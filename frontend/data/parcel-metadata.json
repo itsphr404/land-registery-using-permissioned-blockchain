@@ -1,0 +1,37 @@
+[
+  {
+    "parcelId": 1,
+    "area": "Northfield",
+    "addr": "123 Main Street, Northfield",
+    "size": "1000 m2",
+    "cell": "Northfield-1"
+  },
+  {
+    "parcelId": 2,
+    "area": "Northfield",
+    "addr": "456 Oak Avenue, Northfield",
+    "size": "2500 m2",
+    "cell": "Northfield-1"
+  },
+  {
+    "parcelId": 3,
+    "area": "Riverside",
+    "addr": "789 River Road, Riverside",
+    "size": "500 m2",
+    "cell": "Riverside-1"
+  },
+  {
+    "parcelId": 4,
+    "area": "Downtown",
+    "addr": "321 Commerce Blvd, Downtown",
+    "size": "750 m2",
+    "cell": "Downtown-1"
+  },
+  {
+    "parcelId": 5,
+    "area": "Riverside",
+    "addr": "555 Lake View Drive, Riverside",
+    "size": "1200 m2",
+    "cell": "Riverside-1"
+  }
+]

@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "date": "2026-10-27T19:05:27.169Z",
+    "network": "hardhat in-process",
+    "solc": "0.8.24",
+    "optimizerRuns": 200,
+    "note": "gas is deterministic on this network; latency is not measured because blocks mine instantly"
+  },
+  "proposed": [
+    {
+      "label": "submitParcel(1 owner)",
+      "gas": 259970,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "submitParcel(2 owners)",
+      "gas": 267077,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "submitParcel(5 owners)",
+      "gas": 342867,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "submitParcel(10 owners)",
+      "gas": 479875,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "verifySurvey",
+      "gas": 66038,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "approveRegistration",
+      "gas": 43758,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "consentToSale",
+      "gas": 81922,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "listParcel",
+      "gas": 123006,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "deposit(1 ether)",
+      "gas": 66427,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "approveAsSeller",
+      "gas": 31500,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "approveAsRegistrar (completes sale)",
+      "gas": 283626,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "withdraw",
+      "gas": 32398,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "refundAfterDeadline",
+      "gas": 91548,
+      "txs": 1,
+      "signers": 1
+    }
+  ],
+  "comparison": [
+    {
+      "operation": "Registration",
+      "proposedGas": 369742,
+      "proposedTxs": 3,
+      "proposedSigners": 3,
+      "baselineGas": 137367,
+      "baselineTxs": 1,
+      "baselineSigners": 1,
+      "ratio": "2.69"
+    },
+    {
+      "operation": "Sale (excl. withdraw)",
+      "proposedGas": 586481,
+      "proposedTxs": 5,
+      "proposedSigners": 4,
+      "baselineGas": 31310,
+      "baselineTxs": 1,
+      "baselineSigners": 1,
+      "ratio": "18.73"
+    },
+    {
+      "operation": "Withdraw (proposed only)",
+      "proposedGas": 32398,
+      "proposedTxs": 1,
+      "proposedSigners": 1,
+      "baselineGas": "N/A",
+      "baselineTxs": "N/A",
+      "baselineSigners": "N/A",
+      "ratio": "N/A"
+    }
+  ]
+}

@@ -7,7 +7,14 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "test:gas": "cross-env REPORT_GAS=true hardhat test",
-    "coverage": "hardhat coverage"
+    "coverage": "hardhat coverage",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "seed": "hardhat run scripts/seed.js --network localhost",
+    "bench": "hardhat run scripts/gas-benchmark.js",
+    "frontend": "npm --prefix frontend run dev",
+    "sync-deployments": "copy deployments\\localhost.json frontend\\src\\deployments\\localhost.json",
+    "deploy:full": "npm run deploy:local && npm run sync-deployments && npm run seed"
   },
   "keywords": [],
   "type": "commonjs",

@@ -1,0 +1,18 @@
+Operation,Proposed Gas,Proposed TXs,Proposed Signers,Baseline Gas,Baseline TXs,Baseline Signers,Ratio (P/B)
+submitParcel(1 owner),259970,1,1,,,,
+submitParcel(2 owners),267077,1,1,,,,
+submitParcel(5 owners),342867,1,1,,,,
+submitParcel(10 owners),479875,1,1,,,,
+verifySurvey,66038,1,1,,,,
+approveRegistration,43758,1,1,,,,
+consentToSale,81922,1,1,,,,
+listParcel,123006,1,1,,,,
+deposit(1 ether),66427,1,1,,,,
+approveAsSeller,31500,1,1,,,,
+approveAsRegistrar (completes sale),283626,1,1,,,,
+withdraw,32398,1,1,,,,
+refundAfterDeadline,91548,1,1,,,,
+
+Registration,369742,3,3,137367,1,1,2.69
+Sale (excl. withdraw),586481,5,4,31310,1,1,18.73
+Withdraw (proposed only),32398,1,1,N/A,N/A,N/A,N/A
