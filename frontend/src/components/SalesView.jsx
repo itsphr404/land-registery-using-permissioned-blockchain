@@ -1,246 +1,115 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ethers } from "ethers";
 import { useWallet } from "../context/WalletContext";
-import { approveAsRegistrar, approveAsSeller } from "../lib/parcelActions";
+import {
+  approveAsRegistrar,
+  approveAsSeller,
+  cancelListing,
+  consentToSale,
+  deposit,
+  getWriteContracts,
+  listParcel,
+  refundAfterDeadline,
+} from "../lib/parcelActions";
+import { friendlyError } from "../lib/errors";
+import OwedBox from "./OwedBox";
+import { getReadProvider, getContracts } from "../lib/contracts";
 
-// Resolve the role label for the current wallet
-function getRoleLabel(roles) {
-  if (roles.registrar) return "Registrar";
-  if (roles.surveyor)  return "Surveyor";
-  if (roles.court)     return "Court Officer";
-  if (roles.admin)     return "Admin";
-  if (roles.issuer)    return "Issuer";
-  return "Citizen";
+function countdown(deadline, now) {
+  if (!deadline) return "No deadline";
+  const seconds = Math.max(0, Math.floor((deadline.getTime() - now) / 1000));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days}d ${hours}h ${minutes}m`;
 }
 
-export default function SalesView({ plots, onFocusPlot }) {
+export default function SalesView({ plots, onFocusPlot, onConfirmed, owed, onOwedConfirmed }) {
   const { roles, signer, account } = useWallet();
-  const salesPlots = plots.filter((p) => p.sale);
+  const [busy, setBusy] = useState({});
+  const [feedback, setFeedback] = useState({});
+  const [prices, setPrices] = useState({});
+  const [now, setNow] = useState(Date.now());
 
-  // Per-parcel busy + feedback state
-  const [busyMap,     setBusyMap]     = useState({});
-  const [feedbackMap, setFeedbackMap] = useState({});
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-  function setBusy(id, val) {
-    setBusyMap((prev) => ({ ...prev, [id]: val }));
-  }
-
-  function setFeedback(id, msg, isError) {
-    setFeedbackMap((prev) => ({ ...prev, [id]: { msg, isError } }));
-    setTimeout(() => {
-      setFeedbackMap((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    }, 6000);
-  }
-
-  function friendlyErr(err) {
-    const raw = err?.reason || err?.shortMessage || err?.message || "Transaction failed";
-    if (raw.includes("too many errors") || raw.includes("coalesce") || raw.includes("UNKNOWN_ERROR"))
-      return "Cannot reach the Hardhat node — run: npx hardhat node";
-    if (raw.includes("AccessControl") || raw.includes("Unauthorized"))
-      return "Your wallet does not hold this role on-chain.";
-    if (raw.includes("user rejected") || raw.includes("4001"))
-      return "Transaction rejected in wallet.";
-    return raw;
-  }
-
-  async function handleApproveRegistrar(parcelId) {
-    if (!signer) { alert("Wallet not connected."); return; }
-    setBusy(parcelId, "registrar");
-    try {
-      const numId = Number(parcelId.replace(/^.*?(\d+)$/, "$1"));
-      await approveAsRegistrar(signer, numId);
-      setFeedback(parcelId, "✓ Registrar approval recorded on-chain!", false);
-    } catch (err) {
-      console.error("approveAsRegistrar:", err);
-      setFeedback(parcelId, "✗ " + friendlyErr(err), true);
-    } finally {
-      setBusy(parcelId, null);
+  const visiblePlots = useMemo(() => plots.filter((plot) => plot.st === "approved" || plot.st === "sale"), [plots]);
+  const run = async (key, action, success) => {
+    if (!signer) {
+      setFeedback((current) => ({ ...current, [key]: "Connect a wallet on the configured network first." }));
+      return;
     }
-  }
-
-  async function handleApproveSeller(parcelId) {
-    if (!signer) { alert("Wallet not connected."); return; }
-    setBusy(parcelId, "seller");
+    setBusy((current) => ({ ...current, [key]: true }));
+    setFeedback((current) => ({ ...current, [key]: "" }));
     try {
-      const numId = Number(parcelId.replace(/^.*?(\d+)$/, "$1"));
-      await approveAsSeller(signer, numId);
-      setFeedback(parcelId, "✓ Seller approval recorded on-chain!", false);
-    } catch (err) {
-      console.error("approveAsSeller:", err);
-      setFeedback(parcelId, "✗ " + friendlyErr(err), true);
+      await action();
+      await onConfirmed();
+      setFeedback((current) => ({ ...current, [key]: success }));
+    } catch (error) {
+      const contracts = getWriteContracts(signer);
+      setFeedback((current) => ({ ...current, [key]: friendlyError(error, [contracts.escrow.interface, contracts.registry.interface]) }));
     } finally {
-      setBusy(parcelId, null);
+      setBusy((current) => ({ ...current, [key]: false }));
     }
+  };
+
+  function isOwner(plot) {
+    return Boolean(account && plot.owners.some((owner) => owner.addr.toLowerCase() === account.toLowerCase()));
   }
-
-  const roleLabel = getRoleLabel(roles);
-
-  // What this wallet can do on the sales page
-  const canActAsRegistrar = roles.registrar || roles.admin;
-  // Citizen / owner can act as seller (they are the lister of the parcel)
-  const canActAsSeller    = roles.citizen || roles.issuer;
-  // Registrar cannot double-act as seller — strict separation
-  const isPrivilegedRole  = roles.registrar || roles.surveyor || roles.court || roles.admin;
 
   return (
     <div>
-      <h1 className="page-title">
-        Sales and <i>escrow</i>
-      </h1>
+      <h1 className="page-title">Sales and <i>escrow</i></h1>
+      <OwedBox amount={owed} onConfirmed={onOwedConfirmed} />
+      <p className="note">Sales progress through consent, listing, deposit, dual approval, and completion.</p>
 
-      <p className="note">
-        Ethereum TitleEscrow: A sale completes atomically on-chain only when the
-        buyer deposit, seller approval <em>and</em> registrar approval all exist.
-      </p>
+      {visiblePlots.map((plot) => {
+        const owner = isOwner(plot);
+        const sale = plot.sale;
+        const listed = sale?.status === 1;
+        const funded = sale?.status === 2;
+        const allConsented = plot.owners.every((item) => item.consented);
+        const keyBase = `parcel-${plot.pid}`;
+        const deadlinePassed = funded && sale.deadline && sale.deadline.getTime() <= now;
+        return (
+          <div key={plot.id} style={{ marginBottom: 32 }}>
+            <div className="k">{plot.id} · {plot.addr}</div>
+            <div className="lead"><span>1. Owner consent</span><i></i><span>{plot.owners.map((item) => <span key={item.addr} style={{ display: "block" }}>{item.label} ({item.share}%) — {item.consented ? "consented" : "pending"} {owner && !item.consented && item.addr.toLowerCase() === account?.toLowerCase() && <button className="btn alt" disabled={busy[`${keyBase}-consent`]} onClick={() => run(`${keyBase}-consent`, () => consentToSale(signer, plot.pid), "Consent confirmed.")}>{busy[`${keyBase}-consent`] ? "SIGNING…" : "CONSENT"}</button>}</span>)}</span></div>
+            <div className="lead"><span>2. Listing</span><i></i><span>{plot.st === "approved" ? (
+              owner && allConsented ? <span><input type="number" min="0.000000000000000001" step="0.01" placeholder="ETH price" value={prices[plot.pid] || ""} onChange={(event) => setPrices((current) => ({ ...current, [plot.pid]: event.target.value }))} /><button className="btn" disabled={busy[`${keyBase}-list`]} onClick={() => run(`${keyBase}-list`, () => listParcel(signer, plot.pid, ethers.parseEther(prices[plot.pid] || "0")), "Listing confirmed.")}>{busy[`${keyBase}-list`] ? "LISTING…" : "LIST"}</button></span> : allConsented ? "Waiting for owner to list." : "Waiting for all owner consents."
+            ) : listed ? `Listed for ${sale.price} ETH` : "Funded"}</span></div>
 
-      {/* Role banner */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 20,
-          padding: "8px 12px",
-          background: "var(--sheet)",
-          border: "1px solid var(--line)",
-          font: "12px var(--mono)",
-        }}
-      >
-        <span style={{ color: "var(--mute)" }}>Connected as</span>
-        <strong
-          style={{
-            color: canActAsRegistrar
-              ? "var(--blue)"
-              : canActAsSeller
-              ? "var(--forest)"
-              : "var(--mute)",
-          }}
-        >
-          {roleLabel}
-        </strong>
-        <span style={{ color: "var(--mute)", marginLeft: "auto" }}>
-          {canActAsRegistrar
-            ? "You can approve sales as Registrar."
-            : canActAsSeller
-            ? "You can approve as the property owner / seller."
-            : "Read-only view."}
-        </span>
-      </div>
-
-      {salesPlots.length > 0 ? (
-        salesPlots.map((p) => {
-          const sale  = p.sale;
-          const busy  = busyMap[p.id];
-          const fb    = feedbackMap[p.id];
-
-          return (
-            <div key={p.id} style={{ marginBottom: 32 }}>
-              {/* Parcel header */}
-              <div className="k">{p.id} · {p.addr}</div>
-
-              <p style={{ margin: "6px 0 12px" }}>
-                Seller <strong>{p.owner}</strong> → buyer <strong>{sale.buyer}</strong>
-                {" · "}
-                <span className="mono" style={{ fontWeight: "bold" }}>{sale.price}</span>
-              </p>
-
-              {/* ── Buyer deposit row (info only) ── */}
-              <div className="lead">
-                <span>{sale.funded ? "✓" : "…"} Buyer deposit</span>
-                <i></i>
-                <span>{sale.funded ? "held in escrow contract" : "missing — awaiting buyer"}</span>
-              </div>
-
-              {/* ── Seller approval row ── */}
-              <div className="lead">
-                <span>{sale.sellerOk ? "✓" : "…"} Seller approval</span>
-                <i></i>
-                <span>
-                  {sale.sellerOk ? (
-                    // Already signed — show tick for everyone
-                    <span style={{ color: "var(--forest)" }}>signed</span>
-                  ) : canActAsRegistrar ? (
-                    // Registrar sees this row as read-only info (not their action)
-                    <span style={{ color: "var(--mute)", font: "11px var(--mono)" }}>
-                      awaiting owner signature
-                    </span>
-                  ) : (
-                    // Citizen / seller sees the action button
-                    <button
-                      className="btn alt"
-                      disabled={busy === "seller"}
-                      onClick={() => handleApproveSeller(p.id)}
-                    >
-                      {busy === "seller" ? "SIGNING…" : "APPROVE AS SELLER"}
-                    </button>
-                  )}
-                </span>
-              </div>
-
-              {/* ── Registrar approval row ── */}
-              <div className="lead">
-                <span>{sale.regOk ? "✓" : "…"} Registrar approval</span>
-                <i></i>
-                <span>
-                  {sale.regOk ? (
-                    <span style={{ color: "var(--forest)" }}>signed</span>
-                  ) : canActAsRegistrar ? (
-                    // Registrar sees the action button
-                    <button
-                      className="btn"
-                      disabled={busy === "registrar"}
-                      onClick={() => handleApproveRegistrar(p.id)}
-                    >
-                      {busy === "registrar" ? "SIGNING…" : "APPROVE AS REGISTRAR"}
-                    </button>
-                  ) : (
-                    // Citizen sees this as read-only info
-                    <span style={{ color: "var(--mute)", font: "11px var(--mono)" }}>
-                      awaiting registrar signature
-                      {!account && " — wallet not connected"}
-                    </span>
-                  )}
-                </span>
-              </div>
-
-              {/* ── Inline feedback ── */}
-              {fb && (
-                <div
-                  className="note"
-                  style={{
-                    marginTop: 10,
-                    borderColor: fb.isError ? "var(--red)" : "var(--forest)",
-                    color:       fb.isError ? "var(--red)" : "var(--forest)",
-                  }}
-                >
-                  {fb.msg}
-                </div>
-              )}
-
-              {/* ── Sale completion status ── */}
-              {sale.funded && sale.sellerOk && sale.regOk && (
-                <div
-                  className="note"
-                  style={{ marginTop: 10, borderColor: "var(--forest)", color: "var(--forest)" }}
-                >
-                  ✓ All three conditions met — sale will complete on next contract interaction.
-                </div>
-              )}
-
-              <button
-                className="btn alt"
-                style={{ marginTop: 12 }}
-                onClick={() => onFocusPlot(p.id)}
-              >
-                SHOW ON MAP
-              </button>
-            </div>
-          );
-        })
-      ) : (
-        <p className="sub" style={{ padding: "16px 0" }}>
-          No active sales in escrow.
-        </p>
-      )}
+            {listed && <div className="lead"><span>3. Buyer deposit</span><i></i><span>{owner ? <button className="btn alt" disabled={busy[`${keyBase}-cancel`]} onClick={() => run(`${keyBase}-cancel`, () => cancelListing(signer, plot.pid), "Listing cancelled.")}>{busy[`${keyBase}-cancel`] ? "CANCELLING…" : "CANCEL LISTING"}</button> : <button className="btn" disabled={busy[`${keyBase}-deposit`]} onClick={() => run(`${keyBase}-deposit`, () => deposit(signer, plot.pid, sale.rawPrice), "Deposit confirmed.")}>{busy[`${keyBase}-deposit`] ? "DEPOSITING…" : `DEPOSIT ${sale.price} ETH`}</button>}</span></div>}
+            {funded && <div className="lead"><span>3. Funded sale</span><i></i><span>Deadline: {countdown(sale.deadline, now)}</span></div>}
+            {funded && owner && <BuyerAccessHint buyer={sale.buyer} />}
+            {funded && <div className="lead"><span>4. Approvals</span><i></i><span>
+              {owner && !sale.sellerOk && !deadlinePassed && <button className="btn alt" disabled={busy[`${keyBase}-seller`]} onClick={() => run(`${keyBase}-seller`, () => approveAsSeller(signer, plot.pid), "Seller approval confirmed.")}>{busy[`${keyBase}-seller`] ? "APPROVING…" : "APPROVE AS SELLER"}</button>}
+              {(roles.registrar || roles.admin) && !sale.regOk && !deadlinePassed && <button className="btn" disabled={busy[`${keyBase}-registrar`]} onClick={() => run(`${keyBase}-registrar`, () => approveAsRegistrar(signer, plot.pid), sale.sellerOk ? "Sale completed" : "Registrar approval confirmed.")}>{busy[`${keyBase}-registrar`] ? "APPROVING…" : "APPROVE AS REGISTRAR"}</button>}
+              {deadlinePassed && <button className="btn alt" disabled={busy[`${keyBase}-refund`]} onClick={() => run(`${keyBase}-refund`, () => refundAfterDeadline(signer, plot.pid), "Buyer refund confirmed.")}>{busy[`${keyBase}-refund`] ? "REFUNDING…" : "REFUND BUYER"}</button>}
+              {sale.sellerOk && sale.regOk && <span>Sale completed</span>}
+            </span></div>}
+            {feedback[`${keyBase}-consent`] && <div className="note">{feedback[`${keyBase}-consent`]}</div>}
+            {Object.keys(feedback).filter((key) => key.startsWith(keyBase) && feedback[key] && !key.endsWith("consent")).map((key) => <div key={key} className="note">{feedback[key]}</div>)}
+            <button className="btn alt" onClick={() => onFocusPlot(plot.id)}>SHOW ON MAP</button>
+          </div>
+        );
+      })}
+      {visiblePlots.length === 0 && <p className="sub">No registered parcels are ready for a sale.</p>}
     </div>
   );
+}
+
+function BuyerAccessHint({ buyer }) {
+  const [hasKey, setHasKey] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getContracts(getReadProvider(null))?.documentAccess.encryptionKeyOf(buyer).then(key => {
+      if (active) setHasKey(Boolean(key && key !== "0x"));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [buyer]);
+  return hasKey ? <div className="note">Grant the buyer document access before completing the sale.</div> : null;
 }

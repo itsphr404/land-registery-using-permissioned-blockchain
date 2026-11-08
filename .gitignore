@@ -17,8 +17,9 @@ node_modules
 ignition/deployments/chain-31337
 
 # Local deployments (regenerated on every deploy)
-/deployments
+/deployments/localhost.json
 frontend/src/deployments/localhost.json
 frontend/deployments/localhost.json
 frontend/.env
-
+.dev-ipfs
+frontend/src/demo/demo-vaults.json

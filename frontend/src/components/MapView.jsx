@@ -1,6 +1,9 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import { ST, AREAS, rnd } from "../lib/mapData";
 import { useWallet } from "../context/WalletContext";
+import { approveRegistration, getWriteContracts, verifySurvey } from "../lib/parcelActions";
+import { friendlyError } from "../lib/errors";
+import DocumentPanel from "./DocumentPanel";
 
 const W = 2000;
 const H = 1250;
@@ -30,7 +33,7 @@ const terrainSVG = (() => {
 })();
 
 export default function MapView({ plots, onSelectView }) {
-  const { roles } = useWallet();
+  const { roles, signer } = useWallet();
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: W, h: H });
   const [selectedId, setSelectedId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -42,10 +45,30 @@ export default function MapView({ plots, onSelectView }) {
     pending: true,
   });
   const [searchMsg, setSearchMsg] = useState("");
+  const [busy, setBusy] = useState({});
+  const [actionMessage, setActionMessage] = useState("");
 
   const mapSvgRef = useRef(null);
   const dragRef = useRef({ isDown: false, startX: 0, startY: 0, initX: 0, initY: 0, moved: false });
   const animRef = useRef(null);
+
+  const runPlotAction = async (plot, action, key) => {
+    if (!signer) {
+      setActionMessage("Connect a wallet on the configured network first.");
+      return;
+    }
+    setBusy((current) => ({ ...current, [key]: true }));
+    setActionMessage("");
+    try {
+      await action(signer, plot.pid);
+      setActionMessage("Action confirmed. The plot will refresh automatically.");
+    } catch (error) {
+      const contracts = getWriteContracts(signer);
+      setActionMessage(friendlyError(error, [contracts.registry.interface, contracts.roleManager.interface]));
+    } finally {
+      setBusy((current) => ({ ...current, [key]: false }));
+    }
+  };
 
   // Status counts
   const counts = useMemo(() => {
@@ -62,7 +85,7 @@ export default function MapView({ plots, onSelectView }) {
     return plots.filter((p) => {
       if (!statusFilters[p.st]) return false;
       if (!q) return true;
-      return (p.id + p.addr + p.owner).toLowerCase().includes(q);
+      return (p.id + p.addr + p.owners.map((o) => o.label).join(" ")).toLowerCase().includes(q);
     }).slice(0, 50);
   }, [plots, statusFilters, searchQuery]);
 
@@ -143,7 +166,7 @@ export default function MapView({ plots, onSelectView }) {
       flyTo(ax + 190, ay + 130, 520);
       return;
     }
-    const matchedPlot = plots.find((p) => (p.id + p.addr + p.owner).toLowerCase().includes(q));
+    const matchedPlot = plots.find((p) => (p.id + p.addr + p.owners.map((o) => o.label).join(" ")).toLowerCase().includes(q));
     if (matchedPlot) {
       setSearchMsg(`Found ${matchedPlot.id}`);
       handleSelectPlot(matchedPlot.id);
@@ -376,15 +399,20 @@ export default function MapView({ plots, onSelectView }) {
             <span className="mono">{selectedPlot.id}</span>
             <h3>{selectedPlot.addr}</h3>
             <span className={`stamp st-${selectedPlot.st}`}>
-              {ST[selectedPlot.st][0]}
+            {ST[selectedPlot.st][0]}{selectedPlot.sub ? ` · ${selectedPlot.sub}` : ""}
             </span>
 
             <div className="lead">
-              <span>Owner</span><i></i><span>{selectedPlot.owner}</span>
+            <span>Owners</span><i></i><span>{selectedPlot.owners.map((owner) => `${owner.label} (${owner.share}%)`).join(", ")}</span>
             </div>
             <div className="lead">
               <span>Size</span><i></i><span>{selectedPlot.size}</span>
             </div>
+            <div className="lead">
+            <span>Record integrity</span><i></i><span>{selectedPlot.metaOk ? "verified" : "unverified"}</span>
+            </div>
+            <DocumentPanel plot={selectedPlot} />
+            {actionMessage && <div className="note">{actionMessage}</div>}
 
             {/* ── SALE: escrow details + navigate to approval page ── */}
             {selectedPlot.sale && (
@@ -434,15 +462,27 @@ export default function MapView({ plots, onSelectView }) {
               <>
                 <div className="lead">
                   <span>Verification</span><i></i>
-                  <span>awaiting surveyor and registrar</span>
+                  <span>awaiting {selectedPlot.sub}</span>
                 </div>
 
                 <div className="note" style={{ marginTop: 8 }}>
-                  {roles.registrar || roles.surveyor
-                    ? `⚡ You can process this parcel as ${roles.registrar ? "Registrar" : "Surveyor"}.`
-                    : "Pending survey verification and registrar sign-off."}
+                  {selectedPlot.sub === "survey" && roles.surveyor
+                    ? "⚡ You can verify this survey."
+                    : selectedPlot.sub === "registrar" && roles.registrar
+                    ? "⚡ You can approve this registration."
+                    : `Pending ${selectedPlot.sub} approval.`}
                 </div>
 
+                {selectedPlot.sub === "survey" && roles.surveyor && (
+                  <button className="btn alt" disabled={busy[`survey-${selectedPlot.pid}`]} onClick={() => runPlotAction(selectedPlot, verifySurvey, `survey-${selectedPlot.pid}`)}>
+                    {busy[`survey-${selectedPlot.pid}`] ? "VERIFYING…" : "VERIFY SURVEY"}
+                  </button>
+                )}
+                {selectedPlot.sub === "registrar" && roles.registrar && (
+                  <button className="btn" disabled={busy[`registration-${selectedPlot.pid}`]} onClick={() => runPlotAction(selectedPlot, approveRegistration, `registration-${selectedPlot.pid}`)}>
+                    {busy[`registration-${selectedPlot.pid}`] ? "APPROVING…" : "APPROVE REGISTRATION"}
+                  </button>
+                )}
                 {onSelectView && (
                   <button
                     className="btn"
@@ -452,9 +492,7 @@ export default function MapView({ plots, onSelectView }) {
                       onSelectView("dashboard");
                     }}
                   >
-                    {roles.registrar || roles.surveyor
-                      ? "PROCESS IN DASHBOARD →"
-                      : "VIEW IN DASHBOARD →"}
+                    "VIEW IN DASHBOARD →"
                   </button>
                 )}
               </>

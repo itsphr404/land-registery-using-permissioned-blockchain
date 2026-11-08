@@ -3,7 +3,7 @@ import { useWallet } from "../context/WalletContext";
 import { config } from "../config";
 
 export default function NetworkBanner() {
-  const { status, chainId, switchNetwork, connect } = useWallet();
+  const { status, chainId, switchNetwork } = useWallet();
 
   if (status === "wrong-network") {
     return (
@@ -19,7 +19,7 @@ export default function NetworkBanner() {
           onClick={switchNetwork}
           className="bg-[#e06c75] hover:bg-[#d05963] text-[#161513] font-bold px-3 py-1 rounded text-xs uppercase tracking-wider"
         >
-          Switch to Hardhat (31337)
+          Switch to {config.networkName} ({config.chainId})
         </button>
       </div>
     );

@@ -2,10 +2,11 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { ethers } from "ethers";
 import { config, deployment } from "../config";
 import { getContracts } from "../lib/contracts";
+import { friendlyError } from "../lib/errors";
 
 /**
  * Derive role from the deployment accounts list based on wallet address.
- * This is a fast fallback that works even if the Hardhat node is offline.
+ * This is a fast fallback that works even if the local node is offline.
  */
 function getRoleFromDeployment(account) {
   if (!account || !deployment || !Array.isArray(deployment.accounts)) {
@@ -98,7 +99,7 @@ export function WalletProvider({ children }) {
       } else if (switchError.code === 4001) {
         setError("Network switch was rejected in your wallet.");
       } else {
-        setError("Failed to switch network: " + (switchError.message || ""));
+        setError(friendlyError(switchError));
       }
     }
   }, []);
@@ -118,7 +119,6 @@ export function WalletProvider({ children }) {
       setStatus("no-wallet");
       const msg = "No Ethereum wallet detected (MetaMask or Phantom). Please install MetaMask or enable Ethereum in Phantom.";
       setError(msg);
-      alert(msg);
       return;
     }
 
@@ -154,9 +154,8 @@ export function WalletProvider({ children }) {
       } else if (err.code === -32002) {
         const msg = "A connection request is already waiting in your wallet extension. Click your wallet icon in the browser toolbar to approve.";
         setError(msg);
-        alert(msg);
       } else {
-        setError("Failed to connect wallet: " + (err.message || "Unknown error"));
+        setError(friendlyError(err));
       }
     }
   }, [switchNetwork]);

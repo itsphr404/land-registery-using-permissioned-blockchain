@@ -16,11 +16,12 @@ export function CorrectionsView() {
 
   return (
     <div>
+      <div className="note">Simulated demo data. Not on-chain until Step 7.</div>
       <h1 className="page-title">
         Legal <i>corrections</i>
       </h1>
       <p className="sub">
-        A correction never edits history. It is proposed with a court-order reference, approved by a threshold of authorized roles, then appended as a new version.
+        Demonstration of the proposed corrections workflow. This view does not write to the blockchain.
       </p>
 
       <div className="k">Proposed</div>
@@ -63,7 +64,7 @@ export function CorrectionsView() {
           <span className="new">412 m²</span>
           <br />
           <span className="mono" style={{ color: "var(--mute)" }}>
-            Court order ref CO-77 · initial version preserved in append-only LandRegistry history
+            Demonstration only · not an on-chain correction record
           </span>
         </div>
       </div>
@@ -72,7 +73,6 @@ export function CorrectionsView() {
 }
 
 export function SharesView() {
-  const { roles } = useWallet();
   const [rentClaimed, setRentClaimed] = useState(false);
 
   const holders = [
@@ -82,11 +82,12 @@ export function SharesView() {
 
   return (
     <div>
+      <div className="note">Simulated demo data. Not on-chain until Step 8.</div>
       <h1 className="page-title">
         Fractional <i>shares</i>
       </h1>
       <p className="sub">
-        Parcel #2 (Plot 2, Northfield) fractionalized on-chain. Enforced by LandRegistry compliance rules (maximum 10 co-owners, basis points strictly summing to 100%).
+        Demonstration of fractional ownership and revenue distribution. This view does not write to the blockchain.
       </p>
 
       {/* SVG Allocation Bar */}
@@ -111,7 +112,7 @@ export function SharesView() {
         </svg>
       </div>
 
-      <div className="k">Holders & On-Chain Compliance</div>
+      <div className="k">Holders & Demonstration Compliance</div>
       {holders.map((h, i) => (
         <div key={i} className="lead">
           <span>{h.name}</span>
@@ -122,7 +123,7 @@ export function SharesView() {
         </div>
       ))}
       <p className="mono" style={{ color: "var(--mute)", margin: "8px 0 16px" }}>
-        1,000 shares held by verified participants.
+        Demonstration allocation of 1,000 shares.
       </p>
 
       <div className="k">Pro-Rata Revenue Distribution</div>
@@ -155,7 +156,7 @@ export function AuditView({ events }) {
         Audit <i>trail</i>
       </h1>
       <p className="sub">
-        Cryptographically anchored transaction log. All state updates emit on-chain events and increment the append-only version history.
+        Transaction activity and append-only registry history are shown here.
       </p>
 
       {events.map((e, idx) => (

@@ -9,7 +9,7 @@ export default function RegistryView({ plots, onFocusPlot }) {
     if (filterStatus && p.st !== filterStatus) return false;
     if (!query) return true;
     const q = query.toLowerCase();
-    return (p.id + p.addr + p.owner).toLowerCase().includes(q);
+    return (p.id + p.addr + p.owners.map((o) => o.label).join(" ")).toLowerCase().includes(q);
   });
 
   return (
@@ -57,7 +57,7 @@ export default function RegistryView({ plots, onFocusPlot }) {
         >
           <span className="mono">{p.id}</span>
           <span>{p.addr}</span>
-          <span>{p.owner}</span>
+          <span>{p.owners.map((o) => `${o.label} (${o.share}%)`).join(", ")}</span>
           <span>
             <span className={`g ${p.st}`} style={{ marginRight: "6px" }}>
               {ST[p.st][1]}

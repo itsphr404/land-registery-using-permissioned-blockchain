@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { WalletProvider, useWallet } from "./context/WalletContext";
-import { VIEWS, generateDistrictPlots } from "./lib/mapData";
-import { ADDRESS_LABELS } from "./config";
+import { VIEWS } from "./lib/mapData";
+import { ADDRESS_LABELS, config } from "./config";
 import { useParcels } from "./hooks/useParcels";
 import MapView from "./components/MapView";
 import DashboardView from "./components/DashboardView";
@@ -10,87 +10,37 @@ import SalesView from "./components/SalesView";
 import RegisterView from "./components/RegisterView";
 import { CorrectionsView, SharesView, AuditView } from "./components/ExtraViews";
 import NetworkBanner from "./components/NetworkBanner";
-
-const BASE_DISTRICT_PLOTS = generateDistrictPlots();
-
-const INITIAL_AUDIT = [
-  { time: "2026-10-28 13:49", actor: "System", text: "Deployed RoleManager, LandRegistry, TitleEscrow to Hardhat local node", security: true },
-  { time: "2026-10-28 13:49", actor: "Seeder", text: "Created 5 on-chain parcels across all lifecycle stages", security: false },
-  { time: "2026-10-28 13:49", actor: "Dave", text: "Deposited 1.0 ETH into TitleEscrow for Parcel #5", security: true },
-  { time: "2026-10-28 13:49", actor: "Carol", text: "Consented to sale and listed Parcel #5", security: false },
-  { time: "2026-10-28 13:49", actor: "Registrar", text: "Approved registration of Parcel #1 and #2", security: true },
-  { time: "2026-10-28 13:49", actor: "Surveyor", text: "Verified boundary survey for Parcel #4", security: false },
-];
+import { useAudit } from "./hooks/useAudit";
+import { usePendingWithdrawal } from "./hooks/usePendingWithdrawal";
+import { VaultProvider } from "./context/VaultContext";
+import { setTransactionNotifier } from "./lib/transactions";
 
 function TerraApp() {
   const [activeTab, setActiveTab] = useState("map");
-  const [auditEvents, setAuditEvents] = useState(INITIAL_AUDIT);
   const [toastMessage, setToastMessage] = useState(null);
 
   const { account, status, roles, connect, switchNetwork, error } = useWallet();
-  const { parcels: onChainParcels } = useParcels();
+  const { parcels: plots, refresh: refreshParcels } = useParcels();
+  const { formatted: owed, refresh: refreshOwed } = usePendingWithdrawal(account);
+  const { events: auditEvents } = useAudit();
 
-  const showToast = (msg) => {
-    setToastMessage(msg);
+  const showToast = (toast) => {
+    setToastMessage(toast);
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // Merge live on-chain parcels with the district map
-  const plots = useMemo(() => {
-    const list = [...BASE_DISTRICT_PLOTS];
-
-    if (onChainParcels && onChainParcels.length > 0) {
-      onChainParcels.forEach((onChainP, index) => {
-        if (index < list.length) {
-          const target = list[index];
-
-          // Map on-chain status code to map status
-          let st = "pending";
-          if (onChainP.status === 3) st = "approved";
-          else if (onChainP.status === 4) st = "sale";
-          else if (onChainP.status === 2) st = "approved";
-          else if (onChainP.status === 1) st = "pending";
-
-          const ownersStr = onChainP.owners
-            .map((addr, i) => {
-              const label = ADDRESS_LABELS[addr.toLowerCase()] || `${addr.slice(0, 6)}...`;
-              const isMe = account && addr.toLowerCase() === account.toLowerCase();
-              return `${label} (${onChainP.shares[i]}%)${isMe ? " [YOU]" : ""}`;
-            })
-            .join(", ");
-
-          target.id = `PARCEL-${onChainP.id}`;
-          target.owner = ownersStr;
-          target.st = st;
-
-          if (onChainP.status === 4 && onChainP.deal) {
-            target.sale = {
-              buyer: ADDRESS_LABELS[onChainP.deal.buyer.toLowerCase()] || `${onChainP.deal.buyer.slice(0, 6)}...`,
-              price: `${onChainP.deal.price} ETH`,
-              funded: onChainP.deal.status === 2,
-              sellerOk: onChainP.deal.sellerApproved,
-              regOk: onChainP.deal.registrarApproved,
-            };
-          }
-        }
-      });
-    }
-
-    return list;
-  }, [onChainParcels, account]);
+  useEffect(() => {
+    setTransactionNotifier(({ phase, hash }) => {
+      showToast({ phase, hash });
+      if (phase === "confirmed") refreshParcels();
+    });
+    return () => setTransactionNotifier(null);
+  }, [refreshParcels]);
 
   const handleRegisterNewPlot = (newPlotData) => {
     showToast(`Plot ${newPlotData.addr} submitted to registry pipeline.`);
-    setAuditEvents((prev) => [
-      {
-        time: new Date().toISOString().slice(0, 16).replace("T", " "),
-        actor: account ? (ADDRESS_LABELS[account.toLowerCase()] || "Citizen") : "Citizen",
-        text: `Lodged new parcel: ${newPlotData.addr}`,
-        security: false,
-      },
-      ...prev,
-    ]);
     setActiveTab("map");
+    refreshParcels();
   };
 
   const activeRoleLabel = roles.registrar
@@ -110,11 +60,12 @@ function TerraApp() {
     : null;
 
   return (
+    <VaultProvider account={account}>
     <div>
       {/* Top Banner from zip */}
       <div className="banner">
         <span>
-          TERRA REGISTRY · LIVE ON-CHAIN EXPLORER · HARDHAT LOCAL NODE (31337)
+          TERRA REGISTRY · LIVE ON-CHAIN EXPLORER · {config.networkName} ({config.chainId})
         </span>
         <span className="mono">
           {account ? (
@@ -143,7 +94,9 @@ function TerraApp() {
         </div>
 
         <nav id="nav" aria-label="Sections">
-          {Object.entries(VIEWS).map(([viewKey, viewLabel]) => (
+          {Object.entries(VIEWS)
+            .filter(([viewKey]) => config.chainId === 31337 || !["corrections", "shares"].includes(viewKey))
+            .map(([viewKey, viewLabel]) => (
             <button
               key={viewKey}
               className={`tab-btn ${activeTab === viewKey ? "active" : ""}`}
@@ -183,7 +136,10 @@ function TerraApp() {
 
       {/* Active Tab Main View */}
       <main className="app-main">
-        {activeTab === "map" && (
+        {plots.length === 0 && activeTab !== "register" ? (
+          <p className="sub" style={{ padding: "24px 0" }}>No parcels on this network yet. Register the first one.</p>
+        ) : null}
+        {activeTab === "map" && plots.length > 0 && (
           <MapView plots={plots} onSelectView={setActiveTab} />
         )}
         {activeTab === "dashboard" && (
@@ -192,13 +148,16 @@ function TerraApp() {
             auditEvents={auditEvents}
             onSelectView={setActiveTab}
             onFocusPlot={() => setActiveTab("map")}
+            onConfirmed={refreshParcels}
+            owed={owed}
+            onOwedConfirmed={refreshOwed}
           />
         )}
         {activeTab === "registry" && (
           <RegistryView plots={plots} onFocusPlot={() => setActiveTab("map")} />
         )}
         {activeTab === "sales" && (
-          <SalesView plots={plots} onFocusPlot={() => setActiveTab("map")} />
+          <SalesView plots={plots} onFocusPlot={() => setActiveTab("map")} onConfirmed={refreshParcels} owed={owed} onOwedConfirmed={refreshOwed} />
         )}
         {activeTab === "register" && (
           <RegisterView onRegisterPlot={handleRegisterNewPlot} />
@@ -211,10 +170,15 @@ function TerraApp() {
       {/* Toast notification */}
       {toastMessage && (
         <div className="toast" role="status">
-          {toastMessage}
+          {toastMessage.phase === "pending"
+            ? "Waiting for confirmation, this can take a little while on a public network."
+            : <>Transaction confirmed: {toastMessage.hash}{" "}
+              {config.explorerUrl && <a href={`${config.explorerUrl}/tx/${toastMessage.hash}`} target="_blank" rel="noreferrer">View on Etherscan</a>}
+            </>}
         </div>
       )}
     </div>
+    </VaultProvider>
   );
 }
 

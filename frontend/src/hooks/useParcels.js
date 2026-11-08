@@ -1,272 +1,208 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
-import { deployment } from "../config";
+import { ADDRESS_LABELS, config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
-import { useWallet } from "../context/WalletContext";
+import { cellPts } from "../lib/mapData";
+import { queryFilterChunked } from "../lib/logs";
 
-const STATUS_LABELS = {
-  0: "None",
-  1: "Submitted",
-  2: "Survey Verified",
-  3: "Registered",
-  4: "Under Sale"
+const STATUS = {
+  1: { st: "pending", sub: "survey" },
+  2: { st: "pending", sub: "registrar" },
+  3: { st: "approved", sub: null },
+  4: { st: "sale", sub: null },
 };
 
+function metadataForNetwork() {
+  if (typeof window === "undefined") return {};
+  try {
+    const local = JSON.parse(window.localStorage.getItem(`terra-meta:${config.chainId}`) || "{}");
+    return local && typeof local === "object" ? local : {};
+  } catch (error) {
+    console.warn("Ignoring invalid local parcel metadata:", error);
+    return {};
+  }
+}
+
+function nextFreeCell(area, metadata, reserved) {
+  const used = new Set(
+    Object.values(metadata)
+      .filter((item) => item?.area === area && Number.isInteger(Number(item.cell)))
+      .map((item) => Number(item.cell))
+  );
+  reserved.forEach((cell) => used.add(cell));
+  let cell = 0;
+  while (used.has(cell)) cell += 1;
+  return cell;
+}
+
+function labelFor(address) {
+  const lower = address.toLowerCase();
+  return ADDRESS_LABELS[lower] || `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
 export function useParcels() {
-  const { walletProvider } = useWallet();
   const [parcels, setParcels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const listenersRef = useRef([]);
+  const timerRef = useRef(null);
 
   const fetchParcels = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    if (!deployment || !deployment.contracts) {
+    if (!deployment?.contracts) {
       setError("Contracts not found for this network. Run the deploy script.");
       setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setError(null);
     try {
-      const provider = getReadProvider(walletProvider);
-      const contracts = getContracts(provider);
-
-      if (!contracts) {
-        setError("Contracts not found for this network. Run the deploy script.");
-        setLoading(false);
-        return;
-      }
-
+      const contracts = getContracts(getReadProvider(null));
+      if (!contracts) throw new Error("Contract deployment is unavailable.");
       const { registry, escrow } = contracts;
+      const metadata = metadataForNetwork();
+      const count = Number(await registry.parcelCount());
+      const reservedCells = {};
 
-      let countBig;
-      try {
-        countBig = await registry.parcelCount();
-      } catch (err) {
-        console.error("RPC / ParcelCount error:", err);
-        setError("Cannot reach the network. Is the Hardhat node running?");
-        setLoading(false);
-        return;
-      }
-
-      const count = Number(countBig);
-      const items = [];
-
-      for (let id = 1; id <= count; id++) {
-        try {
-          const statusBig = await registry.getStatus(id);
-          const statusCode = Number(statusBig);
-
-          const [owners, sharesBig] = await registry.getOwners(id);
-          const shares = sharesBig.map((s) => Number(s));
-
-          const vCountBig = await registry.versionCount(id);
-          const versionsCount = Number(vCountBig);
-
-          let latestDocHash = null;
-          let latestCid = null;
-          if (versionsCount > 0) {
-            try {
-              const latestVer = await registry.getVersion(id, versionsCount - 1);
-              latestDocHash = latestVer.docHash;
-              latestCid = latestVer.cid;
-            } catch (e) {
-              // Non-blocking if version fetch fails
-            }
+      const items = await Promise.all(
+        Array.from({ length: count }, (_, index) => index + 1).map(async (pid) => {
+          const [statusValue, ownerData, versionCount] = await Promise.all([
+            registry.getStatus(pid),
+            registry.getOwners(pid),
+            registry.versionCount(pid),
+          ]);
+          const status = Number(statusValue);
+          const info = STATUS[status] || { st: "pending", sub: null };
+          const meta = metadata[String(pid)] || {};
+          const area = meta.area || "Unmapped";
+          reservedCells[area] ||= new Set();
+          const cell = Number.isInteger(Number(meta.cell))
+            ? Number(meta.cell)
+            : nextFreeCell(area, metadata, reservedCells[area]);
+          reservedCells[area].add(cell);
+          const addr = meta.addr || `Parcel #${pid}`;
+          const size = meta.size || "Unknown";
+          const latest = Number(versionCount) > 0
+            ? await registry.getVersion(pid, Number(versionCount) - 1)
+            : null;
+          const docHash = latest?.docHash || null;
+          const cid = latest?.cid || "";
+          const expectedHash = ethers.id(JSON.stringify([area, addr, size]));
+          const currentRound = Number(await registry.consentRound(pid));
+          const ownerAddresses = ownerData[0];
+          const consented = status === 3
+            ? await Promise.all(ownerAddresses.map((owner) => registry.consented(pid, currentRound, owner)))
+            : ownerAddresses.map(() => false);
+          let sale = null;
+          if (status === 4) {
+            const deal = await escrow.getDeal(pid);
+            sale = {
+              buyer: deal.buyer,
+              buyerLabel: labelFor(deal.buyer),
+              seller: deal.seller,
+              price: ethers.formatEther(deal.price),
+              rawPrice: deal.price,
+              deadline: Number(deal.deadline) > 0 ? new Date(Number(deal.deadline) * 1000) : null,
+              funded: Number(deal.status) === 2,
+              sellerOk: deal.sellerApproved,
+              regOk: deal.registrarApproved,
+              status: Number(deal.status),
+            };
           }
-
-          let deal = null;
-          if (statusCode === 4) {
-            // UnderSale
-            try {
-              const d = await escrow.getDeal(id);
-              deal = {
-                seller: d.seller,
-                buyer: d.buyer,
-                price: ethers.formatEther(d.price),
-                rawPrice: d.price,
-                deadline: Number(d.deadline) > 0 ? new Date(Number(d.deadline) * 1000) : null,
-                sellerApproved: d.sellerApproved,
-                registrarApproved: d.registrarApproved,
-                status: Number(d.status), // 0: None, 1: Listed, 2: Funded
-              };
-            } catch (e) {
-              console.warn(`Could not read deal for parcel ${id}:`, e);
-            }
-          }
-
-          items.push({
-            id,
-            status: statusCode,
-            statusLabel: STATUS_LABELS[statusCode] || "Unknown",
-            owners,
-            shares,
-            versionsCount,
-            latestDocHash,
-            latestCid,
-            deal,
-          });
-        } catch (parcelErr) {
-          console.warn(`Error reading parcel ${id}:`, parcelErr);
-        }
-      }
-
+          return {
+            id: `TR-${area.slice(0, 3).toUpperCase()}-${String(pid).padStart(3, "0")}`,
+            pid,
+            st: info.st,
+            sub: info.sub,
+            area,
+            addr,
+            size,
+            cell,
+            pts: cellPts(area, cell, pid),
+            owners: ownerAddresses.map((address, ownerIndex) => ({
+              addr: address,
+              share: Number(ownerData[1][ownerIndex]),
+              label: labelFor(address),
+              consented: Boolean(consented[ownerIndex]),
+            })),
+            docHash,
+            cid,
+            metaOk: Boolean(docHash && docHash.toLowerCase() === expectedHash.toLowerCase()),
+            sale,
+            status,
+            statusLabel: status === 1 ? "Pending" : status === 2 ? "Pending" : status === 3 ? "Approved" : status === 4 ? "On sale" : "Unknown",
+          };
+        })
+      );
       setParcels(items);
     } catch (err) {
       console.error("General error loading parcels:", err);
-      setError("Cannot reach the network. Is the Hardhat node running?");
+      setError(`Cannot reach the ${config.networkName} network.`);
     } finally {
       setLoading(false);
     }
-  }, [walletProvider]);
+  }, []);
 
-  // Set up event listeners for real-time updates
   useEffect(() => {
-    if (!walletProvider || !deployment?.contracts) return;
-
-    const provider = getReadProvider(walletProvider);
+    const provider = getReadProvider(null);
     const contracts = getContracts(provider);
-    if (!contracts) return;
+    if (!contracts) {
+      fetchParcels();
+      return undefined;
+    }
 
-    const { registry, escrow } = contracts;
+    const scheduleFetch = () => {
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(fetchParcels, 500);
+    };
+    const subscriptions = [
+      [contracts.registry, "ParcelSubmitted"],
+      [contracts.registry, "ParcelRegistered"],
+      [contracts.registry, "ParcelLocked"],
+      [contracts.registry, "ParcelUnlocked"],
+      [contracts.registry, "SurveyVerified"],
+      [contracts.registry, "SaleConsentGiven"],
+      [contracts.registry, "OwnershipTransferred"],
+      [contracts.escrow, "Approved"],
+      [contracts.escrow, "Deposited"],
+      [contracts.escrow, "SaleCompleted"],
+      [contracts.escrow, "Withdrawn"],
+      [contracts.escrow, "Refunded"],
+      [contracts.escrow, "Listed"],
+      [contracts.escrow, "ListingCancelled"],
+    ];
+    const isLocal = config.chainId === 31337;
+    let pollTimer;
+    let lastBlock;
+    const refreshFromEvents = async () => {
+      const eventQueries = subscriptions.map(([contract, event]) => queryFilterChunked(
+        contract,
+        contract.filters[event] ? contract.filters[event]() : {},
+        deployment.deployBlock,
+        "latest"
+      ));
+      await Promise.all(eventQueries);
+      scheduleFetch();
+    };
+    if (isLocal) {
+      subscriptions.forEach(([contract, event]) => contract.on(event, scheduleFetch));
+    } else {
+      pollTimer = setInterval(async () => {
+        const block = await provider.getBlockNumber();
+        if (block !== lastBlock) {
+          lastBlock = block;
+          await refreshFromEvents();
+        }
+      }, 15000);
+    }
+    fetchParcels();
 
-    const cleanup = () => {
-      listenersRef.current.forEach(({ contract, event, handler }) => {
-        contract.off(event, handler);
-      });
+    return () => {
+      clearTimeout(timerRef.current);
+      clearInterval(pollTimer);
+      if (isLocal) subscriptions.forEach(([contract, event]) => contract.off(event, scheduleFetch));
       listenersRef.current = [];
     };
-
-    const handleParcelUpdate = (parcelId) => {
-      // Refetch just this parcel
-      refreshParcel(parcelId);
-    };
-
-    // LandRegistry events
-    const onParcelSubmitted = (parcelId, submitter, docHash, cid) => {
-      console.log("ParcelSubmitted:", parcelId, submitter);
-      handleParcelUpdate(parcelId);
-    };
-    const onParcelRegistered = (parcelId, registrar) => handleParcelUpdate(parcelId);
-    const onParcelLocked = (parcelId, lister) => handleParcelUpdate(parcelId);
-    const onParcelUnlocked = (parcelId) => handleParcelUpdate(parcelId);
-    const onSurveyVerified = (parcelId, surveyor) => handleParcelUpdate(parcelId);
-    const onSaleConsentGiven = (parcelId, owner) => handleParcelUpdate(parcelId);
-    const onOwnershipTransferred = (parcelId, newOwner, versionIndex) => handleParcelUpdate(parcelId);
-    const onParcelUnlocked2 = (parcelId) => handleParcelUpdate(parcelId);
-
-    // TitleEscrow events
-    const onApproved = (parcelId, approver, isSeller) => handleParcelUpdate(parcelId);
-    const onDeposited = (parcelId, buyer, amount, deadline) => handleParcelUpdate(parcelId);
-    const onSaleCompleted = (parcelId, seller, buyer, price) => handleParcelUpdate(parcelId);
-    const onWithdrawn = (account, amount) => fetchParcels(); // Refresh all since we don't know which parcel
-    const onRefunded = (parcelId, buyer, amount) => handleParcelUpdate(parcelId);
-    const onListed = (parcelId, seller, price) => handleParcelUpdate(parcelId);
-    const onListingCancelled = (parcelId) => handleParcelUpdate(parcelId);
-
-    try {
-      registry.on("ParcelSubmitted", onParcelSubmitted);
-      listenersRef.current.push({ contract: registry, event: "ParcelSubmitted", handler: onParcelSubmitted });
-      registry.on("ParcelRegistered", onParcelRegistered);
-      listenersRef.current.push({ contract: registry, event: "ParcelRegistered", handler: onParcelRegistered });
-      registry.on("ParcelLocked", onParcelLocked);
-      listenersRef.current.push({ contract: registry, event: "ParcelLocked", handler: onParcelLocked });
-      registry.on("ParcelUnlocked", onParcelUnlocked);
-      listenersRef.current.push({ contract: registry, event: "ParcelUnlocked", handler: onParcelUnlocked });
-      registry.on("SurveyVerified", onSurveyVerified);
-      listenersRef.current.push({ contract: registry, event: "SurveyVerified", handler: onSurveyVerified });
-      registry.on("SaleConsentGiven", onSaleConsentGiven);
-      listenersRef.current.push({ contract: registry, event: "SaleConsentGiven", handler: onSaleConsentGiven });
-      registry.on("OwnershipTransferred", onOwnershipTransferred);
-      listenersRef.current.push({ contract: registry, event: "OwnershipTransferred", handler: onOwnershipTransferred });
-
-      escrow.on("Approved", onApproved);
-      listenersRef.current.push({ contract: escrow, event: "Approved", handler: onApproved });
-      escrow.on("Deposited", onDeposited);
-      listenersRef.current.push({ contract: escrow, event: "Deposited", handler: onDeposited });
-      escrow.on("SaleCompleted", onSaleCompleted);
-      listenersRef.current.push({ contract: escrow, event: "SaleCompleted", handler: onSaleCompleted });
-      escrow.on("Withdrawn", onWithdrawn);
-      listenersRef.current.push({ contract: escrow, event: "Withdrawn", handler: onWithdrawn });
-      escrow.on("Refunded", onRefunded);
-      listenersRef.current.push({ contract: escrow, event: "Refunded", handler: onRefunded });
-      escrow.on("Listed", onListed);
-      listenersRef.current.push({ contract: escrow, event: "Listed", handler: onListed });
-      escrow.on("ListingCancelled", onListingCancelled);
-      listenersRef.current.push({ contract: escrow, event: "ListingCancelled", handler: onListingCancelled });
-    } catch (e) {
-      console.warn("Could not attach event listeners:", e);
-    }
-
-    return cleanup;
-  }, [walletProvider, fetchParcels]);
-
-  const refreshParcel = useCallback(async (parcelId) => {
-    if (!deployment?.contracts) return;
-    try {
-      const provider = getReadProvider(walletProvider);
-      const contracts = getContracts(provider);
-      if (!contracts) return;
-
-      const { registry, escrow } = contracts;
-      const id = Number(parcelId);
-
-      const statusBig = await registry.getStatus(id);
-      const statusCode = Number(statusBig);
-
-      const [owners, sharesBig] = await registry.getOwners(id);
-      const shares = sharesBig.map((s) => Number(s));
-
-      const vCountBig = await registry.versionCount(id);
-      const versionsCount = Number(vCountBig);
-
-      let latestDocHash = null;
-      let latestCid = null;
-      if (versionsCount > 0) {
-        try {
-          const latestVer = await registry.getVersion(id, versionsCount - 1);
-          latestDocHash = latestVer.docHash;
-          latestCid = latestVer.cid;
-        } catch (e) { }
-      }
-
-      let deal = null;
-      if (statusCode === 4) {
-        try {
-          const d = await escrow.getDeal(id);
-          deal = {
-            seller: d.seller,
-            buyer: d.buyer,
-            price: ethers.formatEther(d.price),
-            rawPrice: d.price,
-            deadline: Number(d.deadline) > 0 ? new Date(Number(d.deadline) * 1000) : null,
-            sellerApproved: d.sellerApproved,
-            registrarApproved: d.registrarApproved,
-            status: Number(d.status),
-          };
-        } catch (e) { }
-      }
-
-      setParcels(prev => prev.map(p => p.id === id ? {
-        ...p,
-        status: statusCode,
-        statusLabel: STATUS_LABELS[statusCode] || "Unknown",
-        owners,
-        shares: shares.map(s => Number(s)),
-        versionsCount,
-        latestDocHash,
-        latestCid,
-        deal,
-      } : p));
-    } catch (err) {
-      console.warn(`Error refreshing parcel ${parcelId}:`, err);
-    }
-  }, [walletProvider]);
-
-  useEffect(() => {
-    fetchParcels();
   }, [fetchParcels]);
 
   return { parcels, loading, error, refresh: fetchParcels };

@@ -16,21 +16,22 @@ export function getReadProvider(walletProvider) {
 /**
  * Returns ethers.Contract instances for RoleManager, LandRegistry, and TitleEscrow.
  * @param {ethers.Provider|ethers.Signer} runner
- * @returns {{ roleManager: ethers.Contract, registry: ethers.Contract, escrow: ethers.Contract } | null}
+ * @returns {{ roleManager: ethers.Contract, registry: ethers.Contract, escrow: ethers.Contract, documentAccess: ethers.Contract } | null}
  */
 export function getContracts(runner) {
   if (!deployment || !deployment.contracts) {
     return null;
   }
 
-  const { RoleManager, LandRegistry, TitleEscrow } = deployment.contracts;
-  if (!RoleManager || !LandRegistry || !TitleEscrow) {
+  const { RoleManager, LandRegistry, TitleEscrow, DocumentAccess } = deployment.contracts;
+  if (!RoleManager || !LandRegistry || !TitleEscrow || !DocumentAccess) {
     return null;
   }
 
   const roleManager = new ethers.Contract(RoleManager.address, RoleManager.abi, runner);
   const registry = new ethers.Contract(LandRegistry.address, LandRegistry.abi, runner);
   const escrow = new ethers.Contract(TitleEscrow.address, TitleEscrow.abi, runner);
+  const documentAccess = new ethers.Contract(DocumentAccess.address, DocumentAccess.abi, runner);
 
-  return { roleManager, registry, escrow };
+  return { roleManager, registry, escrow, documentAccess };
 }

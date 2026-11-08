@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { deployment } from "../config";
+import { sendAndWait } from "./transactions";
 
 /**
  * Returns contract instances connected to a signer (for write operations).
@@ -8,14 +9,21 @@ import { deployment } from "../config";
  */
 export function getWriteContracts(signer) {
   if (!deployment || !deployment.contracts) return null;
-  const { RoleManager, LandRegistry, TitleEscrow } = deployment.contracts;
-  if (!RoleManager || !LandRegistry || !TitleEscrow) return null;
+  const { RoleManager, LandRegistry, TitleEscrow, DocumentAccess } = deployment.contracts;
+  if (!RoleManager || !LandRegistry || !TitleEscrow || !DocumentAccess) return null;
 
   return {
     roleManager: new ethers.Contract(RoleManager.address, RoleManager.abi, signer),
     registry: new ethers.Contract(LandRegistry.address, LandRegistry.abi, signer),
     escrow: new ethers.Contract(TitleEscrow.address, TitleEscrow.abi, signer),
+    documentAccess: new ethers.Contract(DocumentAccess.address, DocumentAccess.abi, signer),
   };
+}
+
+export async function grantRole(signer, role, account) {
+  const { roleManager } = getWriteContracts(signer);
+  const tx = await roleManager.grantRole(role, account);
+  return sendAndWait(tx);
 }
 
 /**
@@ -25,7 +33,7 @@ export function getWriteContracts(signer) {
 export async function submitParcel(signer, owners, shares, docHash, cid) {
   const { registry } = getWriteContracts(signer);
   const tx = await registry.submitParcel(owners, shares, docHash, cid);
-  const receipt = await tx.wait();
+  const receipt = await sendAndWait(tx);
   const event = receipt.logs.find(l => l.fragment?.name === "ParcelSubmitted");
   return event?.args?.parcelId || null;
 }
@@ -36,7 +44,7 @@ export async function submitParcel(signer, owners, shares, docHash, cid) {
 export async function verifySurvey(signer, parcelId) {
   const { registry } = getWriteContracts(signer);
   const tx = await registry.verifySurvey(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -45,7 +53,7 @@ export async function verifySurvey(signer, parcelId) {
 export async function approveRegistration(signer, parcelId) {
   const { registry } = getWriteContracts(signer);
   const tx = await registry.approveRegistration(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -54,7 +62,7 @@ export async function approveRegistration(signer, parcelId) {
 export async function consentToSale(signer, parcelId) {
   const { registry } = getWriteContracts(signer);
   const tx = await registry.consentToSale(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -63,7 +71,7 @@ export async function consentToSale(signer, parcelId) {
 export async function listParcel(signer, parcelId, price) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.listParcel(parcelId, price);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -72,7 +80,7 @@ export async function listParcel(signer, parcelId, price) {
 export async function deposit(signer, parcelId, price) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.deposit(parcelId, { value: price });
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -81,7 +89,7 @@ export async function deposit(signer, parcelId, price) {
 export async function approveAsSeller(signer, parcelId) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.approveAsSeller(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -90,7 +98,7 @@ export async function approveAsSeller(signer, parcelId) {
 export async function approveAsRegistrar(signer, parcelId) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.approveAsRegistrar(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -99,7 +107,7 @@ export async function approveAsRegistrar(signer, parcelId) {
 export async function withdraw(signer) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.withdraw();
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -108,7 +116,7 @@ export async function withdraw(signer) {
 export async function refundAfterDeadline(signer, parcelId) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.refundAfterDeadline(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**
@@ -117,7 +125,7 @@ export async function refundAfterDeadline(signer, parcelId) {
 export async function cancelListing(signer, parcelId) {
   const { escrow } = getWriteContracts(signer);
   const tx = await escrow.cancelListing(parcelId);
-  return tx.wait();
+  return sendAndWait(tx);
 }
 
 /**

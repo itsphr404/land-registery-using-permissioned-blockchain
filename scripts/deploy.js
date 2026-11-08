@@ -14,11 +14,12 @@ async function main() {
 
     console.log("\n🚀 Deploying contracts...\n");
 
-    const { roleManager, registry, escrow, signers } = await deployAll();
+    const { roleManager, registry, escrow, documentAccess, signers } = await deployAll();
 
     const roleManagerAddr = await roleManager.getAddress();
     const registryAddr = await registry.getAddress();
     const escrowAddr = await escrow.getAddress();
+    const documentAccessAddr = await documentAccess.getAddress();
 
     // Get deploy block number
     const deployBlock = await ethers.provider.getBlockNumber();
@@ -33,6 +34,7 @@ async function main() {
     const roleManagerArtifact = await hre.artifacts.readArtifact("RoleManager");
     const registryArtifact = await hre.artifacts.readArtifact("LandRegistry");
     const escrowArtifact = await hre.artifacts.readArtifact("TitleEscrow");
+    const documentAccessArtifact = await hre.artifacts.readArtifact("DocumentAccess");
 
     // Prepare deployment data
     const deploymentData = {
@@ -51,6 +53,10 @@ async function main() {
             TitleEscrow: {
                 address: escrowAddr,
                 abi: escrowArtifact.abi
+            },
+            DocumentAccess: {
+                address: documentAccessAddr,
+                abi: documentAccessArtifact.abi
             }
         },
         accounts: []
@@ -70,8 +76,8 @@ async function main() {
     const outputPath = path.join(deploymentsDir, "localhost.json");
     fs.writeFileSync(outputPath, JSON.stringify(deploymentData, null, 2));
 
-    // Also write to frontend/deployments/localhost.json
-    const frontendDeploymentsDir = path.join(__dirname, "..", "frontend", "deployments");
+    // Also write to frontend/src/deployments/localhost.json for Vite's bundled config.
+    const frontendDeploymentsDir = path.join(__dirname, "..", "frontend", "src", "deployments");
     if (!fs.existsSync(frontendDeploymentsDir)) {
         fs.mkdirSync(frontendDeploymentsDir, { recursive: true });
     }
@@ -90,6 +96,7 @@ async function main() {
     console.log(`  RoleManager:     ${roleManagerAddr}`);
     console.log(`  LandRegistry:    ${registryAddr}`);
     console.log(`  TitleEscrow:     ${escrowAddr}`);
+    console.log(`  DocumentAccess:  ${documentAccessAddr}`);
     console.log("-".repeat(90));
     console.log("Accounts & Roles:");
     console.log("  Index | Label      | Address                                    | Role");

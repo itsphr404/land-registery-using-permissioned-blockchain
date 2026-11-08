@@ -186,8 +186,8 @@ roleManager.isRegistrar(addr)
 - View helper correctness (5 tests)
 
 **Key Attack Vectors Tested:**
-- **A3 (Fake Registrar)**: Non-admin cannot grant roles ✓
-- **A4 (History Tampering)**: Registrar cannot grant roles ✓
+- **A3 Impersonation**: Non-admin cannot grant roles ✓
+- **A4 Rogue registrar**: Registrar separation is enforced ✓
 - **Privilege Escalation**: ConflictingRole enforced for all 3 duty-separated roles ✓
 
 ---
@@ -267,22 +267,22 @@ function submitParcel(...) external nonReentrant returns (uint256 parcelId)
 |-------|-------|----------------|
 | `owners.length == shares.length` | `LengthMismatch` | Data corruption |
 | `owners.length >= 1` | `NoOwners` | Ghost parcels |
-| `owners.length <= MAX_OWNERS (10)` | `TooManyOwners` | Gas griefing / A7 |
+| `owners.length <= MAX_OWNERS (10)` | `TooManyOwners` | Bounded ownership input |
 | No `address(0)` in owners | `ZeroAddress` | Burned ownership |
-| No duplicate owners | `DuplicateOwner` | Double-counting shares / A7 |
-| Every `share > 0` | `ZeroShare` | Worthless shares / A7 |
-| `sum(shares) == 100` | `SharesMustSumTo100` | Overselling / A7 |
+| No duplicate owners | `DuplicateOwner` | Duplicate ownership entries |
+| Every `share > 0` | `ZeroShare` | Invalid ownership entry |
+| `sum(shares) == 100` | `SharesMustSumTo100` | Invalid share total |
 | `msg.sender` in owners | `SubmitterNotAnOwner` | Impersonation / A3 |
 | `docHash != 0` | `EmptyDocHash` | Missing legal proof |
 | `cid != ""` | `EmptyCid` | Missing metadata pointer |
 
 **On success:**
-- `parcelCount++` (new unique ID — **stops A1 double registration**)
+- `parcelCount++` (new unique ID — **supports A1 double-sale protection**)
 - `status = Submitted`
 - `_appendVersion(..., VersionReason.Initial)` — creates version 0
 - Emits `ParcelSubmitted` event
 
-**Why `nonReentrant`?** Prevents reentrancy attacks (**A6**) where a malicious contract calls back into submitParcel mid-execution.
+**Why `nonReentrant`?** Prevents a malicious contract from calling back into `submitParcel` mid-execution.
 
 ---
 
@@ -291,7 +291,7 @@ function submitParcel(...) external nonReentrant returns (uint256 parcelId)
 function verifySurvey(uint256 parcelId) external nonReentrant
 ```
 **Checks:**
-1. `roleManager.isSurveyor(msg.sender)` — **NotSurveyor** if false (**A3/A4**)
+1. `roleManager.isSurveyor(msg.sender)` — **NotSurveyor** if false (**A3 Impersonation / A4 Rogue registrar**)
 2. `status == Submitted` — **InvalidStatus** if not (can't verify Registered land)
 3. **ConflictOfInterest:** Caller not in `versions[parcelId].owners` — surveyor can't verify their own land
 
@@ -300,7 +300,7 @@ function verifySurvey(uint256 parcelId) external nonReentrant
 - `surveyedBy[parcelId] = msg.sender` (audit trail)
 - Emits `SurveyVerified`
 
-**Attacks stopped:** A3 (fake surveyor), A4 (skip survey), ConflictOfInterest (self-verification fraud)
+**Protections:** A3 Impersonation, A4 Rogue registrar, and the self-verification conflict check
 
 ---
 
@@ -309,7 +309,7 @@ function verifySurvey(uint256 parcelId) external nonReentrant
 function approveRegistration(uint256 parcelId) external nonReentrant
 ```
 **Checks:**
-1. `roleManager.isRegistrar(msg.sender)` — **NotRegistrar** (**A3/A4**)
+1. `roleManager.isRegistrar(msg.sender)` — **NotRegistrar** (**A3 Impersonation / A4 Rogue registrar**)
 2. `status == SurveyVerified` — **InvalidStatus** (enforces order: survey THEN register)
 3. **ConflictOfInterest:** Registrar not an owner — can't approve your own parcel
 
@@ -317,7 +317,7 @@ function approveRegistration(uint256 parcelId) external nonReentrant
 - `status = Registered`
 - Emits `ParcelRegistered`
 
-**Attacks stopped:** A3 (fake registrar), A4 (history tampering — can't skip survey), ConflictOfInterest (self-approval)
+**Protections:** A3 Impersonation, A4 Rogue registrar, and the self-approval conflict check
 
 ---
 
@@ -352,7 +352,7 @@ Without rounds, old consents would carry over — Bob could unlock, then Alice r
 function lockForSale(uint256 parcelId, address lister) external nonReentrant
 ```
 **Checks:**
-1. `roleManager.isEscrow(msg.sender)` — **NotEscrow** (**A3**: only escrow can list)
+1. `roleManager.isEscrow(msg.sender)` — **NotEscrow** (**A3 Impersonation**: only escrow can list)
 2. `status == Registered` — **InvalidStatus** (can't list Unregistered or already-listed land)
 3. `lister` is current owner — **NotAParcelOwner**
 4. `consentCount == owners.length` — **ConsentsMissing** (unanimous required)
@@ -361,7 +361,7 @@ function lockForSale(uint256 parcelId, address lister) external nonReentrant
 - `status = UnderSale`
 - Emits `ParcelLocked`
 
-**A1 Double-Sale Prevention:** If already `UnderSale`, `status != Registered` → reverts. **Cannot list same parcel twice.**
+**A1 Double sale:** If already `UnderSale`, `status != Registered` → reverts. **Cannot list the same parcel twice.**
 
 ---
 
@@ -386,7 +386,7 @@ function unlockParcel(uint256 parcelId) external nonReentrant
 function transferParcel(uint256 parcelId, address newOwner) external nonReentrant
 ```
 **Checks:**
-1. Only Escrow (**NotEscrow** — **A3**)
+1. Only Escrow (**NotEscrow** — **A3 Impersonation**)
 2. `status == UnderSale` — **InvalidStatus** (can only transfer during active sale)
 3. `newOwner != address(0)` — **ZeroAddress**
 
@@ -403,14 +403,14 @@ reason = VersionReason.Sale
 - `consentRound++`, `consentCount = 0` (clean slate for new owner)
 - Emits `OwnershipTransferred(parcelId, newOwner, newVersionIndex)`
 
-**Append-Only Version History (Critical for A4):**
+**Append-Only Version History:**
 ```
 versions[parcelId][0] = { owners: [Alice, Bob], shares: [60,40], reason: Initial }
 versions[parcelId][1] = { owners: [Carol],      shares: [100],   reason: Sale, docHash/cid SAME }
 ```
 - **Old versions NEVER deleted or modified** — full audit trail
 - Anyone can call `getVersion(parcelId, 0)` to see original owners
-- **A4 History Tampering stopped:** Even admin can't rewrite history; only append
+- **A4 Rogue registrar protection:** Registration follows the required independent approval path; versions are append-only.
 
 ---
 
@@ -440,7 +440,7 @@ function _appendVersion(...) internal returns (uint256) {
 | `verifyDocument(parcelId, hash)` | `bool` (matches latest docHash?) | `ParcelNotFound` |
 | `isOwner(parcelId, account)` | `bool` | `ParcelNotFound` |
 
-**`verifyDocument` stops A2:** Off-chain, anyone can verify a presented deed hash matches the on-chain record. Forged documents return `false`.
+**`verifyDocument` implements A2:** Off-chain, anyone can verify a presented deed hash matches the on-chain record. Forged documents return `false`.
 
 ---
 
@@ -456,24 +456,37 @@ for (owner in latest.owners) {
 **Real-world analogy:** A judge cannot preside over their own lawsuit. A surveyor cannot verify their own land. A registrar cannot register their own parcel.
 
 **Attacks prevented:**
-- Surveyor + Owner = "I verify my fake boundaries" (**A3/A4**)
-- Registrar + Owner = "I approve my un-surveyed land" (**A3/A4**)
+- Surveyor + Owner = impersonation/conflict of interest (**A3/A4**)
+- Registrar + Owner = rogue registrar/conflict of interest (**A3/A4**)
 - Combined with RoleManager separation of duties: **One person cannot be Surveyor + Registrar + Owner simultaneously**
 
 ---
+
+## Encrypted document model
+
+The original file is hashed with SHA-256 into `docHash`. A public manifest CID
+describes the document and points to the encrypted ciphertext in storage.
+`DocumentAccess` keeps per-reader wrapped file keys and the access/rotation
+audit trail; it does not provide confidentiality by itself. The named A6
+scenarios in `test/documentFlow.js` and `test/docCrypto.js` cover vaults,
+authenticated encryption, reader isolation, tamper detection, and rotation.
+
+The dev store is only a local IPFS substitute, Kubo is an optional separately
+operated service, lost passwords/backups are unrecoverable, and deployed
+browsers require HTTPS (`http://localhost` is allowed for local development).
 
 ## Attack Mapping: Which Code Stops Which Attack
 
 | Attack | Code Defense |
 |--------|--------------|
-| **A1: Double Registration** | `parcelCount` unique ID; `lockForSale` reverts if `status != Registered`; can't submit same parcel twice |
-| **A2: Unauthorized Transfer** | Only `Escrow` can call `transferParcel`; `verifyDocument` detects forged hashes |
-| **A3: Fake Registrar/Surveyor** | `roleManager.isRegistrar/isSurveyor/isEscrow` checks on every gated function; RoleManager separation of duties |
-| **A4: History Tampering** | Append-only `versions[]` array; status flow enforced (can't skip survey); events for every transition |
-| **A5: Front-running** | `nonReentrant` on all state changes; strict status checks enforce order |
-| **A6: Reentrancy** | `ReentrancyGuard` inheritance + `nonReentrant` modifier on every external function |
-| **A7: Fractional Oversell** | Shares must sum to 100; MAX_OWNERS=10; zero shares rejected; duplicate owners rejected |
-| **A8: Privacy Leakage** | On-chain: only hashes (docHash), CIDs, addresses. No names, IDs, coordinates. PII off-chain via IPFS/CID. |
+| **A1: Double sale** | `parcelCount` creates unique IDs and `lockForSale` rejects an already listed parcel. Implemented and tested |
+| **A2: Forged document** | `verifyDocument` detects a hash that does not match the stored record. Implemented and tested |
+| **A3: Impersonation** | `isRegistrar`, `isSurveyor`, `isEscrow`, owner, seller, and buyer checks protect gated actions. Implemented and tested |
+| **A4: Rogue registrar** | Separation of duties, required survey/registration order, and conflict checks protect approvals. Implemented and tested |
+| **A5: Escrow reentrancy** | `withdraw()` alone uses `nonReentrant`, with pull payments and effects-first clearing. Implemented and tested |
+| **A6: Unauthorised file access** | Encrypted storage, per-reader wrapped keys, vaults, authenticated decryption, and rotation are implemented and tested in `test/documentFlow.js` and `test/docCrypto.js` |
+| **A7: KYC bypass** | Not implemented in this contract set. Planned, Step 8 |
+| **A8: Override abuse** | Not implemented in this contract set. Planned, Step 7 |
 
 ---
 
@@ -484,7 +497,7 @@ for (owner in latest.owners) {
 | **1** | "Why does `consentToSale` use a `round` counter instead of just a boolean `hasConsented`?" | Without rounds, if Alice and Bob consent, escrow unlocks (sale cancelled), then Alice relists — Bob's old consent would still count. Rounds force **fresh unanimous consent per sale attempt**: `unlockParcel` increments `consentRound`, zeroes `consentCount`, invalidating all prior votes. |
 | **2** | "What prevents a malicious registrar from calling `approveRegistration` on a parcel that was never surveyed?" | The `require(status == SurveyVerified)` check. `approveRegistration` reverts `InvalidStatus(current, SurveyVerified)` if status is `Submitted` (1) instead of `SurveyVerified` (2). The status machine **enforces order**: Submit → Survey → Register. Cannot skip. |
 | **3** | "How does `transferParcel` preserve the legal document hash across ownership changes?" | `_appendVersion` copies `latest.docHash` and `latest.cid` into the new version. The new version has `reason = Sale` and new owner at 100%, but **docHash/cid are identical** to version 0. `verifyDocument` checks the *latest* version, so the legal proof travels with the land forever. |
-| **4** | "Could an attacker front-run `lockForSale` by submitting a parcel with the same details?" | **A1 prevented by unique `parcelCount`.** Each `submitParcel` increments `parcelCount` — two parcels with identical owners/shares/docHash get **different IDs**. `lockForSale` operates on `parcelId`, not content. Double-listing same ID reverts (`status != Registered`). |
+| **4** | "Could an attacker submit a duplicate parcel before `lockForSale`?" | **A1 Double sale is prevented by unique `parcelCount`.** Each `submitParcel` increments `parcelCount` — two parcels with identical owners/shares/docHash get **different IDs**. `lockForSale` operates on `parcelId`, not content. Listing the same ID twice reverts (`status != Registered`). |
 | **5** | "Why is `versions` an array of structs instead of a single `Parcel` struct with current owners?" | **Append-only history = tamper-proof audit trail (A4).** A single struct could be overwritten. With `versions[]`, every change (Initial, Sale, Correction) creates a new immutable record. `getVersion(parcelId, 0)` always returns the original owners. Courts/regulators can reconstruct full ownership chain. |
 
 ---
@@ -499,7 +512,7 @@ for (owner in latest.owners) {
 | **Function Coverage** | 93.33% |
 | **Line Coverage** | 95.73% |
 
-**All A1–A8 attack vectors covered in tests.**
+**A1–A6 are implemented and tested. A7–A8 remain planned work.**
 
 ---
 
@@ -507,7 +520,7 @@ for (owner in latest.owners) {
 
 ## High-Level Purpose
 
-`TitleEscrow` is the **safe-sale machine** that holds buyer funds and completes the atomic transfer when both seller AND registrar approve. It's where your **A1 and A5 defences live**, and where **A3 and A4 get their strongest tests**.
+`TitleEscrow` is the **safe-sale machine** that holds buyer funds and completes the atomic transfer when both seller AND registrar approve. It implements A1 Double sale, A3 Impersonation, A4 Rogue registrar, and A5 Escrow reentrancy protections.
 
 **Key Design Decisions:**
 - **Pull payments only** — contract never sends ETH automatically; records "you are owed X" and you collect with `withdraw()`
@@ -515,7 +528,7 @@ for (owner in latest.owners) {
 - **Pro-rata split by shares** — 60/40 co-owned parcel pays 60% and 40%; rounding remainder goes to listing seller
 - **Conflict of interest** — registrar cannot be buyer or parcel owner
 - **Dual approval required** — seller alone cannot complete, registrar alone cannot complete
-- **Registry lock prevents double-sale** — registry's `lockForSale` blocks second listing (A1)
+- **Registry lock prevents double sale** — registry's `lockForSale` blocks a second listing (A1)
 
 ---
 
@@ -557,12 +570,12 @@ function listParcel(uint256 parcelId, uint256 price) external
 **Checks:**
 1. `price > 0` — `InvalidPrice`
 2. `registry.isOwner(parcelId, msg.sender)` — `NotParcelOwner`
-3. `deal.status == None` — `DealExists` (A1: can't list twice)
+3. `deal.status == None` — `DealExists` (A1 Double sale: can't list twice)
 4. **Effects first**: saves deal, **then** calls `registry.lockForSale(parcelId, seller)`
 
 **Why effects first?** If `lockForSale` reverts (e.g., missing consents), deal never saved — no partial state.
 
-**A1 Defense:** Registry's `lockForSale` requires `status == Registered` and all consents. Second listing reverts at registry level. Escrow's `DealExists` catches it first.
+**A1 Double sale protection:** Registry's `lockForSale` requires `status == Registered` and all consents. A second listing reverts at registry level. Escrow's `DealExists` catches it first.
 
 ### 3. `cancelListing(parcelId)` — **Seller only, before deposit**
 ```solidity
@@ -578,8 +591,8 @@ function deposit(uint256 parcelId) external payable
 ```
 **Checks:**
 1. Deal=Listed (`NoActiveDeal` if None, `WrongDealStatus` otherwise)
-2. `msg.value == price` — `WrongAmount(sent, expected)` (A1: prevents over/under pay)
-3. `!registry.isOwner(parcelId, msg.sender)` — `BuyerIsOwner` (A4: owner can't buy own land)
+2. `msg.value == price` — `WrongAmount(sent, expected)` (A1 Double sale workflow requires an exact deposit)
+3. `!registry.isOwner(parcelId, msg.sender)` — `BuyerIsOwner` (A4 Rogue registrar workflow prevents conflicted ownership actions)
 
 **On success**: Sets buyer, status→Funded, deadline=now+7days
 **Event**: `Deposited(parcelId, buyer, amount, deadline)`
@@ -596,9 +609,9 @@ function approveAsSeller(uint256 parcelId) external
 function approveAsRegistrar(uint256 parcelId) external
 ```
 **Checks:**
-1. `roleManager.isRegistrar(msg.sender)` — `NotRegistrar` (A3: only registrar)
+1. `roleManager.isRegistrar(msg.sender)` — `NotRegistrar` (A3 Impersonation: only registrar)
 2. Deal=Funded, not expired, not already approved
-3. **Conflict of Interest**: `msg.sender != buyer && !registry.isOwner(parcelId, msg.sender)` — `ConflictOfInterest` (A4: registrar ≠ buyer/owner)
+3. **Conflict of Interest**: `msg.sender != buyer && !registry.isOwner(parcelId, msg.sender)` — `ConflictOfInterest` (A4 Rogue registrar: registrar ≠ buyer/owner)
 
 **On success**: `registrarApproved=true`, emits `Approved(..., false)`, calls `_tryComplete`
 
@@ -623,7 +636,7 @@ for each owner: credit += price * share / 100
 remainder = price - sum(credits) → seller
 ```
 
-**Effects-before-interactions (A5/A6):**
+**Effects-before-interactions (A5 Escrow reentrancy):**
 - Deal deleted, balances credited **before** `registry.transferParcel`
 - If transfer fails, state already clean (deal deleted)
 - `withdraw` also clears balance BEFORE `.call`
@@ -647,7 +660,7 @@ function withdraw() external nonReentrant {
 }
 ```
 
-**Why pull payments (A5/A6)?**
+**Why pull payments (A5 Escrow reentrancy)?**
 - Contract never pushes ETH — receiver pulls
 - Malicious receiver can't hijack sale by reverting in receive()
 - Balance cleared BEFORE external call → reentrancy safe
@@ -658,14 +671,14 @@ function withdraw() external nonReentrant {
 
 | Attack | Defence |
 |--------|---------|
-| **A1: Double Sale** | Registry `lockForSale` blocks second listing; `DealExists` in escrow |
-| **A2: Unauthorized Transfer** | Only Escrow calls `transferParcel`; dual approval required |
-| **A3: Fake Registrar** | Dual approval (seller + registrar); RoleManager separation |
-| **A4: Self-Approval** | `ConflictOfInterest` blocks registrar=buyer/owner |
-| **A5: Front-running** | `nonReentrant` on all state changes; effects-first |
-| **A6: Reentrancy** | `ReentrancyGuard` + pull payments + effects-first |
-| **A7: Oversell** | Pro-rata from registry shares; sum exactly = price |
-| **A8: Privacy** | Minimal on-chain data (addresses, amounts, hashes) |
+| **A1: Double sale** | Registry `lockForSale` blocks a second listing; `DealExists` protects the escrow record. Implemented and tested |
+| **A2: Forged document** | The registry's document-hash verification detects a forged document. Implemented and tested |
+| **A3: Impersonation** | Role and participant checks reject unauthorized actors. Implemented and tested |
+| **A4: Rogue registrar** | `ConflictOfInterest` blocks a registrar who is the buyer or an owner. Implemented and tested |
+| **A5: Escrow reentrancy** | Only `withdraw()` uses `nonReentrant`; pull payments and effects-first clearing protect funds. Implemented and tested |
+| **A6: Unauthorised file access** | Implemented through encrypted storage and `DocumentAccess` reader-key wrapping. Tested in `test/documentFlow.js` and `test/docCrypto.js` |
+| **A7: KYC bypass** | Not implemented in this contract set. Planned, Step 8 |
+| **A8: Override abuse** | Not implemented in this contract set. Planned, Step 7 |
 
 ---
 
@@ -685,18 +698,18 @@ function withdraw() external nonReentrant {
 
 | Metric | Result |
 |--------|--------|
-| **Tests Passing** | 45 / 45 |
+| **Tests Passing** | 165 / 165 full suite |
 | **Statement Coverage** | 100% |
-| **Branch Coverage** | 96.43% |
+| **Branch Coverage** | 89.73% |
 | **Function Coverage** | 100% |
-| **Line Coverage** | 100% |
+| **Line Coverage** | 99.34% |
 
-**Test Categories (45 tests):**
+**Test Categories (TitleEscrow contributes 45 tests to the 150-test full suite):**
 - DEPLOYMENT (3), LIST (6), CANCEL (4), DEPOSIT (7), SELLER APPROVAL (5)
 - REGISTRAR APPROVAL (7), A4 SINGLE APPROVAL (2), COMPLETION (4)
 - REFUND (4), WITHDRAW (2), A5 REENTRANCY (2), DIRECT ETH (1), INVARIANT (1)
 
-**Key Attack Vectors Tested:** A1✓ A2✓ A3✓ A4✓ A5✓ A6✓ A7✓ A8✓
+**Key Project Protections:** A1✓ A2✓ A3✓ A4✓ A5✓ A6✓; A7 planned (Step 8), A8 planned (Step 7)
 
 ---
 
@@ -891,7 +904,7 @@ const gasUsed = Number(receipt.gasUsed);  // BigInt → Number
 | # | Question | Model Answer |
 |---|----------|--------------|
 | **1** | **"Why is your system more expensive than the baseline?"** | The baseline does **one thing in one transaction** (authority transfers parcel). Our system enforces **due process**: surveyor verifies, registrar approves, all owners consent, escrow holds funds, dual approval completes. Each check is a transaction with storage writes. The 2.69× registration and 18.73× sale overhead is the **cost of fraud prevention** — no single party can seize land, forge history, or double-sell. |
-| **2** | **"Is it a fair comparison?"** | **Yes, functionally fair; economically different.** Both achieve "Alice owns parcel → Bob owns parcel." But baseline has **zero protections** (authority can seize, double-sell, lose records). Our system adds **separation of duties, append-only history, escrow, consent**. The gas premium buys **A1–A8 attack resistance**. A fairer baseline would be a *centralized database* (near-zero gas, but requires trust). |
+| **2** | **"Is it a fair comparison?"** | **Yes, functionally fair; economically different.** Both achieve "Alice owns parcel → Bob owns parcel." But baseline has **zero workflow protections**. Our system adds **separation of duties, append-only history, escrow, consent**, and encrypted per-reader document access. The gas premium reflects the implemented A1–A6 protections. A fairer baseline would be a *centralized database* (near-zero gas, but requires trust). |
 | **3** | **"Could you reduce the gas cost without losing security?"** | **Marginally, yes:** batch consent transactions, use `calldata` over `memory` where possible, pack bools into bits. But the **fundamental cost** (3 signers for registration, 4 for sale) is inherent to **multi-party authorization**. You can't have "surveyor + registrar + owners consent" in fewer transactions without centralizing trust. Layer 2 (Arbitrum, Optimism) reduces *USD cost* 10–100× while keeping same gas. |
 | **4** | **"What does `approveAsRegistrar` do that costs 283k gas?"** | It **completes the sale atomically**: deletes deal, credits 4 owners pro-rata (loop over owners), transfers parcel in registry (creates new version, resets consents), emits event. One transaction does what 5+ would do manually. The loop over owners (`for i in owners`) scales linearly — 10 owners would add ~80k gas. This is the **price of atomic, auditable completion**. |
 | **5** | **"Why is latency not in your benchmark?"** | Hardhat mines blocks instantly (`evm_mine` in <1ms). No network propagation, no consensus, no mempool. **Gas measures computation cost** (EVM steps: SLOAD, SSTORE, CALL, LOG). **Latency measures wall-clock time** (network propagation, consensus, block time). Real latency depends on L1/L2, congestion, RPC provider — not protocol logic. We isolate *protocol cost*, not *infrastructure cost*. |
@@ -911,4 +924,4 @@ const gasUsed = Number(receipt.gasUsed);  // BigInt → Number
 | Time-travel | Advances blockchain time to test deadline refunds |
 | Benchmark | Quantifies the security-vs-cost tradeoff with real numbers |
 
-**The trade-off is explicit:** You pay ~3–19× more gas to eliminate **8 attack vectors (A1–A8)** that the baseline has zero defense against. On Layer 2, this gas cost becomes pennies.
+**The trade-off is explicit:** You pay additional gas for the implemented A1–A6 protections, while A7–A8 remain planned for later steps. On Layer 2, this gas cost becomes pennies.

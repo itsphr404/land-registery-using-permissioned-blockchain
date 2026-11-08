@@ -19,6 +19,11 @@ describe("Deployment Integration", function () {
         expect(await escrow.registry()).to.equal(await registry.getAddress());
     });
 
+    it("documentAccess.registry() equals the registry address", async function () {
+        const { registry, documentAccess } = await loadFixture(fixture);
+        expect(await documentAccess.registry()).to.equal(await registry.getAddress());
+    });
+
     it("admin holds DEFAULT_ADMIN_ROLE", async function () {
         const { roleManager, signers } = await loadFixture(fixture);
         const adminRole = await roleManager.DEFAULT_ADMIN_ROLE();

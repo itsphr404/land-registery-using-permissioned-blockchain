@@ -651,40 +651,59 @@ describe("TitleEscrow", function () {
     });
 
     describe("A5 REENTRANCY", function () {
-        it("all state-changing external functions have nonReentrant modifier (ReentrancyGuard)", async function () {
-            const { titleEscrow } = await loadFixture(fixture);
-            const bytecode = await ethers.provider.getCode(await titleEscrow.getAddress());
+        async function prepareAttackerPayout() {
+            const {
+                reentrancyAttacker,
+                landRegistry,
+                titleEscrow,
+                registrar,
+                surveyor,
+                buyer
+            } = await loadFixture(fixture);
+            const registryAddress = await landRegistry.getAddress();
+            const escrowAddress = await titleEscrow.getAddress();
+            const price = ethers.parseEther("1");
 
-            // Verify ReentrancyGuard is deployed (check for the guardian storage slot pattern)
-            // The contract inherits ReentrancyGuard which uses a single storage slot for the guard
-            expect(bytecode.length).to.be.greaterThan(1000); // Non-trivial contract
-
-            // All external functions in TitleEscrow use nonReentrant:
-            // listParcel, cancelListing, deposit, approveAsSeller, approveAsRegistrar,
-            // refundAfterDeadline, withdraw - all marked nonReentrant
-            // This is verified by the contract compiling and all other tests passing
-        });
-
-        it("withdraw reverts on reentrant call attempt (nonReentrant guard)", async function () {
-            const { titleEscrow, landRegistry, registrar, surveyor, alice, buyer } = await loadFixture(fixture);
-
-            // Set up a completed sale
-            const parcelId = await registered(landRegistry, { [alice.address]: alice }, registrar, surveyor, [alice.address], [100]);
-            await consentAll(landRegistry, { [alice.address]: alice }, [alice.address], parcelId);
-            await titleEscrow.connect(alice).listParcel(parcelId, ethers.parseEther("1"));
-            await titleEscrow.connect(buyer).deposit(parcelId, { value: ethers.parseEther("1") });
-            await titleEscrow.connect(alice).approveAsSeller(parcelId);
+            await reentrancyAttacker.submitParcel(registryAddress, ethers.id("evil-deed"), "cid");
+            const parcelId = await landRegistry.parcelCount();
+            await landRegistry.connect(surveyor).verifySurvey(parcelId);
+            await landRegistry.connect(registrar).approveRegistration(parcelId);
+            await reentrancyAttacker.consent(registryAddress, parcelId);
+            await reentrancyAttacker.list(escrowAddress, parcelId, price);
+            await titleEscrow.connect(buyer).deposit(parcelId, { value: price });
+            await reentrancyAttacker.approve(escrowAddress, parcelId);
             await titleEscrow.connect(registrar).approveAsRegistrar(parcelId);
 
-            // First withdraw succeeds
-            await titleEscrow.connect(alice).withdraw();
+            return { reentrancyAttacker, titleEscrow, price };
+        }
 
-            // Second withdraw from same account should fail (nothing to withdraw)
-            await expect(titleEscrow.connect(alice).withdraw())
-                .to.be.revertedWithCustomError(titleEscrow, "NothingToWithdraw");
+        it("A5: attacker re-enters withdraw() during payout, the guard blocks it, funds are paid once", async function () {
+            const { reentrancyAttacker, titleEscrow, price } = await prepareAttackerPayout();
+            const attackerAddress = await reentrancyAttacker.getAddress();
 
-            // The nonReentrant modifier on withdraw prevents reentrant calls during the ETH transfer
-            // This is verified by the ReentrancyGuard inheritance and all external functions using nonReentrant
+            expect(await titleEscrow.pendingWithdrawals(attackerAddress)).to.equal(price);
+
+            await reentrancyAttacker.attackWithdraw(await titleEscrow.getAddress());
+
+            expect(await reentrancyAttacker.reentryAttempted()).to.equal(true);
+            expect(await reentrancyAttacker.reentryBlocked()).to.equal(true);
+            expect((await reentrancyAttacker.lastRevertData()).slice(0, 10))
+                .to.equal(ethers.id("ReentrancyGuardReentrantCall()").slice(0, 10));
+            expect(await ethers.provider.getBalance(attackerAddress)).to.equal(price);
+            expect(await ethers.provider.getBalance(await titleEscrow.getAddress())).to.equal(0);
+            expect(await titleEscrow.pendingWithdrawals(attackerAddress)).to.equal(0);
+        });
+
+        it("A5: a receiver that reverts makes withdraw() revert TransferFailed and keeps the balance", async function () {
+            const { reentrancyAttacker, titleEscrow, price } = await prepareAttackerPayout();
+            const attackerAddress = await reentrancyAttacker.getAddress();
+
+            await reentrancyAttacker.setRevertOnReceive(true);
+
+            await expect(reentrancyAttacker.attackWithdraw(await titleEscrow.getAddress()))
+                .to.be.revertedWithCustomError(titleEscrow, "TransferFailed");
+            expect(await titleEscrow.pendingWithdrawals(attackerAddress)).to.equal(price);
+            expect(await ethers.provider.getBalance(await titleEscrow.getAddress())).to.equal(price);
         });
     });
 

@@ -1,9 +1,24 @@
 # Land Registry - Technical Documentation
 
 ## Overview
-A Fraud-Resilient, Privacy-Preserving and Legally Correctable Blockchain Land Registry with Compliance-Gated Fractional Ownership.
+A Fraud-Resilient and Legally Correctable Blockchain Land Registry with Compliance-Gated Fractional Ownership.
 
 **Tech Stack:** Solidity 0.8.24, Hardhat 2.x, OpenZeppelin Contracts v5, ethers v6, CommonJS
+
+## Encrypted document model
+
+For A6, `docHash` is the SHA-256 hash of the original file. The registry
+stores that fingerprint and a CID for a public JSON manifest. The encrypted
+file is stored in the development store or Kubo IPFS, and `DocumentAccess`
+stores wrapped file keys for individual readers plus the access audit log.
+Vaults protect private keys with PBKDF2 and AES-GCM; authenticated decryption,
+tamper detection, access requests, and rotation are covered by
+`test/documentFlow.js` and `test/docCrypto.js`.
+
+The development store is not real IPFS, Kubo must be operated separately,
+lost passwords/backups cannot be recovered, and browser cryptography requires
+a secure context (HTTPS in deployment; `http://localhost` is allowed locally).
+A7 KYC and A8 court override governance remain outside this implementation.
 
 ---
 
@@ -47,12 +62,17 @@ Permissions layer for the entire registry. Manages role-based access control wit
 - Callers don't need to import role constants
 - Prevents typo-induced bugs (`REGISTRAR_ROLE` vs `REGISTAR_ROLE`)
 
-### Attack Surface Mitigated
-| Attack | Mitigation |
-|--------|------------|
-| **A3: Fake Registrar** | Only accounts with `REGISTRAR_ROLE` can register parcels; role granted by admin only |
-| **Privilege Escalation** | Separation of duties prevents one account from being both Registrar and Court |
-| **Admin Key Compromise** | Single admin role; recommend multisig/timelock in production |
+### Attack Surface
+| ID | Project definition | Status |
+|----|--------------------|--------|
+| **A1 Double sale** | Parcel sale locking and deal uniqueness prevent a parcel from being sold twice. | Implemented and tested |
+| **A2 Forged document** | Document hashes are stored and checked by `verifyDocument`. | Implemented and tested |
+| **A3 Impersonation** | Role checks and owner checks prevent unauthorized actors from acting as owners or officials. | Implemented and tested |
+| **A4 Rogue registrar** | Role separation and registrar conflict-of-interest checks prevent a registrar from approving a conflicted sale. | Implemented and tested |
+| **A5 Escrow reentrancy** | Pull payments, effects-first state changes, and the `withdraw()` guard protect escrow payouts. | Implemented and tested |
+| **A6 Unauthorised file access** | Encrypted files use per-reader wrapped keys, vaults, authenticated decryption, tamper checks, and document rotation through `DocumentAccess`. | Implemented and tested in `test/documentFlow.js` and `test/docCrypto.js` |
+| **A7 KYC bypass** | KYC enforcement is not yet implemented in the contracts. | Planned, Step 8 |
+| **A8 Override abuse** | Court override controls are not yet implemented in the contracts. | Planned, Step 7 |
 
 ### Examiner Questions & Answers
 
@@ -86,9 +106,9 @@ Permissions layer for the entire registry. Manages role-based access control wit
 - Separation of duties enforcement (5 tests)
 - View helper correctness (5 tests)
 
-**Key Attack Vectors Tested:**
-- **A3 (Fake Registrar)**: Non-admin cannot grant roles ✓
-- **A4 (History Tampering)**: Registrar cannot grant roles ✓
+**Key Project Protections Tested:**
+- **A3 Impersonation**: Non-admin cannot grant roles ✓
+- **A4 Rogue registrar**: Registrar separation is enforced ✓
 - **Privilege Escalation**: ConflictingRole enforced for all 3 duty-separated roles ✓
 
 ---
@@ -135,18 +155,18 @@ Submitted (1) ──verifySurvey──► SurveyVerified (2) ──approveRegist
 ### View Functions
 - `getStatus`, `getOwners`, `versionCount`, `getVersion`, `verifyDocument`, `isOwner`
 
-### Fraud Guards (A1–A8)
+### Project protections (A1–A8)
 
 | Attack | Mitigation |
 |--------|------------|
-| **A1: Double Registration** | Unique `parcelCount` ID; `lockForSale` reverts if already UnderSale |
-| **A2: Unauthorized Transfer** | Only Escrow can transfer; `verifyDocument` detects forged hashes |
-| **A3: Fake Registrar** | RoleManager separation: only Registrar can approve; admin controls roles |
-| **A4: History Tampering** | Append-only `versions[]` array; events for every transition |
-| **A5: Front-running** | `nonReentrant` on all state changes; status checks enforce order |
-| **A6: Reentrancy** | `ReentrancyGuard` on all external functions |
-| **A7: Fractional Oversell** | Shares sum=100 enforced; MAX_OWNERS=10; only Issuer can create shares (future) |
-| **A8: Privacy Leakage** | Minimal on-chain data (hashes, CIDs); PII off-chain |
+| **A1: Double sale** | Unique parcel state and escrow deal checks prevent a second sale. **Implemented and tested.** |
+| **A2: Forged document** | `verifyDocument` detects a hash that does not match the stored legal document hash. **Implemented and tested.** |
+| **A3: Impersonation** | Role checks, owner checks, and caller restrictions prevent unauthorized actors. **Implemented and tested.** |
+| **A4: Rogue registrar** | Registrar role separation and conflict-of-interest checks prevent conflicted approval. **Implemented and tested.** |
+| **A5: Escrow reentrancy** | `withdraw()` uses `nonReentrant`; escrow state is cleared before the external payout call. **Implemented and tested.** |
+| **A6: Unauthorised file access** | `DocumentAccess` is a key directory and audit log; encrypted files use per-reader wrapped keys and rotation. **Implemented and tested in `test/documentFlow.js` and `test/docCrypto.js`.** |
+| **A7: KYC bypass** | KYC checks are not yet present. **Planned, Step 8.** |
+| **A8: Override abuse** | Court override governance is not yet present. **Planned, Step 7.** |
 
 ### Test Results (LandRegistry.js)
 
@@ -171,14 +191,14 @@ Submitted (1) ──verifySurvey──► SurveyVerified (2) ──approveRegist
 - VIEWS (2): getOwners, getVersion bad index
 
 **Key Attack Vectors Tested:**
-- **A1 (Double Sale)**: Second `lockForSale` reverts ✓
-- **A2 (Document Forgery)**: `verifyDocument` returns false for forged hash ✓
-- **A3 (Fake Registrar)**: Non-registrar cannot approve ✓
-- **A4 (History Tampering)**: Skip survey reverts; append-only versions ✓
-- **A5 (Front-running)**: `nonReentrant` + status checks ✓
-- **A6 (Reentrancy)**: `ReentrancyGuard` on all state changes ✓
-- **A7 (Fractional Oversell)**: Shares must sum to 100 ✓
-- **A8 (Privacy)**: Minimal on-chain PII ✓
+- **A1 Double sale**: Second `lockForSale` reverts. Implemented and tested ✓
+- **A2 Forged document**: `verifyDocument` returns false for a forged hash. Implemented and tested ✓
+- **A3 Impersonation**: Non-registrars and non-owners cannot perform protected actions. Implemented and tested ✓
+- **A4 Rogue registrar**: Survey and registration separation plus conflict checks are enforced. Implemented and tested ✓
+- **A5 Escrow reentrancy**: Escrow withdrawal protection is exercised by the full suite. Implemented and tested ✓
+- **A6 Unauthorised file access**: Implemented and tested in `test/documentFlow.js` and `test/docCrypto.js` ✓
+- **A7 KYC bypass**: Planned, Step 8
+- **A8 Override abuse**: Planned, Step 7
 
 ---
 
@@ -212,32 +232,32 @@ DealStatus: None → Listed → Funded → Completed
 - Rounding remainder goes to the listing seller
 - Sum of credits always equals exact price
 
-### Conflict of Interest (A4)
+### Conflict of Interest (A4 Rogue registrar)
 - Registrar cannot be buyer or parcel owner
 - Enforced in `approveAsRegistrar`: `msg.sender != buyer && !registry.isOwner(parcelId, msg.sender)`
 
-### Fraud Guards (A1–A8)
+### Project protections (A1–A8)
 
 | Attack | Mitigation |
 |--------|------------|
-| **A1: Double Sale** | Registry's `lockForSale` blocks second listing; `DealExists` reverts in escrow |
-| **A2: Unauthorized Transfer** | Only Escrow can call `transferParcel`; dual approval required |
-| **A3: Fake Registrar** | Dual approval (seller + registrar); RoleManager separation |
-| **A4: Self-Approval** | Registrar ≠ buyer/owner enforced; seller cannot approve as registrar |
-| **A5: Front-running** | `nonReentrant` on all state changes; effects-before-interactions |
-| **A6: Reentrancy** | `ReentrancyGuard` + pull payments + effects-first pattern |
-| **A7: Fractional Oversell** | Pro-rata split from registry shares; sum exactly equals price |
-| **A8: Privacy** | Minimal on-chain data; prices, addresses only |
+| **A1: Double sale** | Registry locking and escrow deal uniqueness prevent a second sale. Implemented and tested |
+| **A2: Forged document** | Document hashes are verified against the latest registry version. Implemented and tested |
+| **A3: Impersonation** | Role, owner, seller, and buyer checks protect the workflow. Implemented and tested |
+| **A4: Rogue registrar** | Registrar approval rejects conflicted buyers and owners. Implemented and tested |
+| **A5: Escrow reentrancy** | Only `withdraw()` is guarded with `nonReentrant`; state is cleared before payout. Implemented and tested |
+| **A6: Unauthorised file access** | Implemented through encrypted storage, vaults, wrapped reader keys, authenticated decryption, and rotation. Tested in `test/documentFlow.js` and `test/docCrypto.js` |
+| **A7: KYC bypass** | Not implemented in this contract set. Planned, Step 8 |
+| **A8: Override abuse** | Not implemented in this contract set. Planned, Step 7 |
 
 ### Test Results (TitleEscrow.js)
 
 | Metric | Result |
 |--------|--------|
-| **Tests Passing** | 45 / 45 (TitleEscrow) + 52 (LandRegistry) + 28 (RoleManager) = 125 total |
+| **Tests Passing** | 165 / 165 full suite |
 | **Statement Coverage** | 100% |
-| **Branch Coverage** | 96.43% |
+| **Branch Coverage** | 89.73% |
 | **Function Coverage** | 100% |
-| **Line Coverage** | 100% |
+| **Line Coverage** | 99.34% |
 
 **Test Categories (45 tests):**
 - DEPLOYMENT (3): roleManager/registry stored, ZeroAddress guards
@@ -246,23 +266,23 @@ DealStatus: None → Listed → Funded → Completed
 - DEPOSIT (7): success + WrongAmount (low/high), A1 second buyer, BuyerIsOwner, NoActiveDeal
 - SELLER APPROVAL (5): success + NotSeller×3, WrongDealStatus, AlreadyApproved, DealExpired
 - REGISTRAR APPROVAL (7): success + NotRegistrar×4, ConflictOfInterest×2, WrongDealStatus, DealExpired, AlreadyApproved
-- A4 SINGLE APPROVAL (2): seller-only, registrar-only → no completion
+- A4 Rogue registrar single approval (2): seller-only, registrar-only → no completion
 - COMPLETION (4): both orders, 60/40 split, rounding remainder to seller
 - REFUND (4): DeadlineNotReached, success + relist, approvals after refund, WrongDealStatus on Listed
 - WITHDRAW (2): seller collects, buyer refund collects, NothingToWithdraw
-- A5 REENTRANCY (2): nonReentrant on all functions, withdraw reentrancy blocked
+- A5 REENTRANCY (2): `withdraw()` reentrancy blocked and receiver failure preserves funds
 - DIRECT ETH (1): plain ETH transfer reverts
 - INVARIANT (1): balance = open deals + pending withdrawals
 
 **Key Attack Vectors Tested:**
-- **A1 (Double Sale)**: `DealExists` + registry `lockForSale` blocks ✓
-- **A2 (Forgery)**: Dual approval + `verifyDocument` in registry ✓
-- **A3 (Fake Registrar)**: Dual approval + RoleManager separation ✓
-- **A4 (Self-Approval)**: `ConflictOfInterest` blocks registrar=buyer/owner ✓
-- **A5 (Front-running)**: `nonReentrant` + effects-first ✓
-- **A6 (Reentrancy)**: `ReentrancyGuard` + pull payments + effects-first ✓
-- **A7 (Oversell)**: Pro-rata from registry shares, sum=price ✓
-- **A8 (Privacy)**: Minimal on-chain data ✓
+- **A1 Double sale**: `DealExists` and registry locking prevent a second sale. Implemented and tested ✓
+- **A2 Forged document**: `verifyDocument` rejects a forged hash. Implemented and tested ✓
+- **A3 Impersonation**: Role and ownership checks reject unauthorized actors. Implemented and tested ✓
+- **A4 Rogue registrar**: `ConflictOfInterest` and role separation reject conflicted approval. Implemented and tested ✓
+- **A5 Escrow reentrancy**: `withdraw()` reentrancy is blocked and receiver failures preserve the balance. Implemented and tested ✓
+- **A6 Unauthorised file access**: Implemented and tested in `test/documentFlow.js` and `test/docCrypto.js` ✓
+- **A7 KYC bypass**: Planned, Step 8
+- **A8 Override abuse**: Planned, Step 7
 
 ---
 

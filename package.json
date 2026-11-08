@@ -13,14 +13,16 @@
     "seed": "hardhat run scripts/seed.js --network localhost",
     "bench": "hardhat run scripts/gas-benchmark.js",
     "frontend": "npm --prefix frontend run dev",
-    "sync-deployments": "copy deployments\\localhost.json frontend\\src\\deployments\\localhost.json",
-    "deploy:full": "npm run deploy:local && npm run sync-deployments && npm run seed"
+    "deploy:full": "npm run deploy:local && npm run seed",
+    "ipfs:dev": "node scripts/dev-ipfs.js",
+    "deploy:sepolia": "hardhat run scripts/deploy-sepolia.js --network sepolia"
   },
   "keywords": [],
   "type": "commonjs",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
     "cross-env": "^10.1.0",
+    "dotenv": "^16.6.1",
     "hardhat": "^2.29.1"
   },
   "dependencies": {

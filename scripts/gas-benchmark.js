@@ -15,7 +15,7 @@ async function runProposedBenchmarks() {
     console.log("\n📊 Running Proposed System Benchmarks...\n");
 
     // Fresh deployment
-    const { roleManager, registry, escrow, signers } = await deployAll();
+    const { roleManager, registry, escrow, documentAccess, signers } = await deployAll();
     const registrar = registry.connect(signers[1]);
     const surveyor = registry.connect(signers[2]);
     const alice = registry.connect(signers[4]);
@@ -103,6 +103,72 @@ async function runProposedBenchmarks() {
     const parcelId = await createAndRegisterParcel(
         [4], [100], ethers.id("bench-reg"), "cid-reg"
     );
+    const documentKey = ethers.hexlify(ethers.randomBytes(294));
+    const wrappedKey = ethers.hexlify(ethers.randomBytes(256));
+    const documentAccessAlice = documentAccess.connect(signers[4]);
+    const documentAccessBob = documentAccess.connect(signers[5]);
+    const documentAccessCarol = documentAccess.connect(signers[6]);
+    const documentAccessDave = documentAccess.connect(signers[7]);
+
+    await (await documentAccessAlice.registerEncryptionKey(documentKey)).wait();
+    {
+        const r = await measureGas(
+            documentAccessAlice.registerEncryptionKey(ethers.hexlify(ethers.randomBytes(294))),
+            "registerEncryptionKey (294 bytes)"
+        );
+        r.txs = 1;
+        r.signers = 1;
+        results.push(r);
+    }
+
+    await (await documentAccessBob.registerEncryptionKey(documentKey)).wait();
+    await (await documentAccessCarol.registerEncryptionKey(documentKey)).wait();
+    await (await documentAccessDave.registerEncryptionKey(documentKey)).wait();
+    {
+        const r = await measureGas(
+            documentAccessAlice.grantAccess(parcelId, signers[5].address, wrappedKey),
+            "grantAccess (256 bytes)"
+        );
+        r.txs = 1;
+        r.signers = 1;
+        results.push(r);
+    }
+    {
+        const r = await measureGas(
+            documentAccessAlice.grantAccessBatch(
+                parcelId,
+                [signers[5].address, signers[6].address, signers[7].address],
+                [wrappedKey, wrappedKey, wrappedKey]
+            ),
+            "grantAccessBatch (3 readers)"
+        );
+        r.txs = 1;
+        r.signers = 1;
+        results.push(r);
+    }
+    {
+        const r = await measureGas(
+            documentAccessAlice.revokeAccess(parcelId, signers[5].address),
+            "revokeAccess"
+        );
+        r.txs = 1;
+        r.signers = 1;
+        results.push(r);
+    }
+    {
+        const r = await measureGas(
+            documentAccessAlice.rotateDocument(
+                parcelId,
+                "cid-rotated",
+                [signers[5].address, signers[6].address],
+                [wrappedKey, wrappedKey]
+            ),
+            "rotateDocument (2 readers)"
+        );
+        r.txs = 1;
+        r.signers = 1;
+        results.push(r);
+    }
 
     // ===== verifySurvey =====
     {
@@ -365,7 +431,11 @@ async function runComparisonBenchmarks() {
             operation: "Sale (excl. withdraw)",
             proposedGas: proposedSaleGas,
             proposedTxs: 5,
-            proposedSigners: 4,
+            proposedSigners: new Set([
+                signers[4].address,
+                signers[7].address,
+                signers[1].address
+            ]).size,
             baselineGas: baselineSaleGas,
             baselineTxs: 1,
             baselineSigners: 1,
@@ -426,7 +496,8 @@ function saveResults(proposed, comparison) {
         network: "hardhat in-process",
         solc: "0.8.24",
         optimizerRuns: 200,
-        note: "gas is deterministic on this network; latency is not measured because blocks mine instantly"
+        note: "gas is deterministic on this network; latency is not measured because blocks mine instantly",
+        note2: "Baseline transfer moves no money; the proposed sale includes escrow custody, co-owner consent and dual approval, so the ratio is the price of protection, not a like-for-like cost."
     };
 
     const output = { metadata, proposed, comparison };

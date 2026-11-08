@@ -31,6 +31,11 @@ async function deployAll() {
     const escrow = await TitleEscrow.deploy(roleManager, registry);
     await escrow.waitForDeployment();
 
+    // Deploy DocumentAccess
+    const DocumentAccess = await ethers.getContractFactory("DocumentAccess");
+    const documentAccess = await DocumentAccess.deploy(registry);
+    await documentAccess.waitForDeployment();
+
     // Grant roles
     const registrarRole = await roleManager.REGISTRAR_ROLE();
     const surveyorRole = await roleManager.SURVEYOR_ROLE();
@@ -54,7 +59,7 @@ async function deployAll() {
     const tx5 = await roleManager.connect(signers[0]).grantRole(escrowRole, escrowAddress);
     await tx5.wait();
 
-    return { roleManager, registry, escrow, signers };
+    return { roleManager, registry, escrow, documentAccess, signers };
 }
 
 module.exports = { deployAll, ACCOUNT_LABELS };

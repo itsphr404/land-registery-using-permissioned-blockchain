@@ -25,6 +25,7 @@ contract ReentrancyAttacker {
     bool public reentryAttempted;
     bool public reentryBlocked;
     bool public revertOnReceive;
+    bytes public lastRevertData;
 
     // === Helper functions acting as a malicious seller ===
 
@@ -97,12 +98,11 @@ contract ReentrancyAttacker {
      * The TitleEscrow's nonReentrant modifier on withdraw() prevents actual reentrant calls.
      */
     receive() external payable {
-        if (revertOnReceive) {
-            revert("ReentrancyAttacker: forced revert");
+        if (revertOnReceive) revert("ReentrancyAttacker: forced revert");
+        if (!reentryAttempted) {
+            reentryAttempted = true;
+            try target.withdraw() { reentryBlocked = false; }
+            catch (bytes memory reason) { reentryBlocked = true; lastRevertData = reason; }
         }
-        reentryAttempted = true;
-        // Note: Actual reentrant call would be blocked by TitleEscrow's ReentrancyGuard
-        // We don't attempt it here to avoid encoding issues; the guard is tested by
-        // verifying attacker only receives funds once (balance check in test).
     }
 }

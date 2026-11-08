@@ -1,10 +1,11 @@
 {
   "metadata": {
-    "date": "2026-10-27T19:05:27.169Z",
+    "date": "2026-11-04T16:32:23.930Z",
     "network": "hardhat in-process",
     "solc": "0.8.24",
     "optimizerRuns": 200,
-    "note": "gas is deterministic on this network; latency is not measured because blocks mine instantly"
+    "note": "gas is deterministic on this network; latency is not measured because blocks mine instantly",
+    "note2": "Baseline transfer moves no money; the proposed sale includes escrow custody, co-owner consent and dual approval, so the ratio is the price of protection, not a like-for-like cost."
   },
   "proposed": [
     {
@@ -28,6 +29,36 @@
     {
       "label": "submitParcel(10 owners)",
       "gas": 479875,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "registerEncryptionKey (294 bytes)",
+      "gas": 82048,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "grantAccess (256 bytes)",
+      "gas": 246304,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "grantAccessBatch (3 readers)",
+      "gas": 491272,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "revokeAccess",
+      "gas": 68306,
+      "txs": 1,
+      "signers": 1
+    },
+    {
+      "label": "rotateDocument (2 readers)",
+      "gas": 505922,
       "txs": 1,
       "signers": 1
     },
@@ -101,7 +132,7 @@
       "operation": "Sale (excl. withdraw)",
       "proposedGas": 586481,
       "proposedTxs": 5,
-      "proposedSigners": 4,
+      "proposedSigners": 3,
       "baselineGas": 31310,
       "baselineTxs": 1,
       "baselineSigners": 1,
