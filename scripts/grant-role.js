@@ -4,7 +4,7 @@ require("dotenv").config({ quiet: true });
 const { ethers } = require("ethers");
 const path = require("path");
 const { grantRole } = require("./lib/grantRole");
-const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+const withTimeout = (p, ms, msg) => { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg)), ms); })]).finally(() => clearTimeout(t)); };
 
 (async () => {
   const [role, wallet] = process.argv.slice(2);

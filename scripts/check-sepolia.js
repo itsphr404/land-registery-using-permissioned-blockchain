@@ -3,7 +3,7 @@ require("dotenv").config({ quiet: true });
 const { ethers } = require("ethers");
 const path = require("path");
 const { checkDeployment } = require("./lib/checkDeployment");
-const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+const withTimeout = (p, ms, msg) => { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(msg)), ms); })]).finally(() => clearTimeout(t)); };
 
 (async () => {
   if (!process.env.SEPOLIA_RPC_URL) { console.error("SEPOLIA_RPC_URL is missing in .env"); process.exit(1); }
