@@ -30,8 +30,21 @@ async function checkDeployment({ ethers, provider, deployment, expectedChainId =
     return [!bad];
   });
   if (c.RoleManager) {
-    const map = { registrar: "isRegistrar", surveyor: "isSurveyor", court: "isCourt", issuer: "isIssuer" };
-    for (const [role, fn] of Object.entries(map)) for (const w of (deployment.roles && deployment.roles[role]) || []) await safe(`${role} role granted to ${w}`, async () => [await c.RoleManager[fn](w)]);
+    const map = {
+      registrars: ["registrar", "isRegistrar"],
+      surveyors: ["surveyor", "isSurveyor"],
+      courts: ["court", "isCourt"],
+      issuers: ["issuer", "isIssuer"],
+    };
+    for (const [role, [label, fn]] of Object.entries(map)) {
+      const wallets = new Set([
+        ...((deployment.roles && deployment.roles[role]) || []),
+        ...((deployment.roles && deployment.roles[label]) || []),
+      ]);
+      for (const w of wallets) {
+        await safe(`${label} role granted to ${w}`, async () => [await c.RoleManager[fn](w)]);
+      }
+    }
   }
   if (c.LandRegistry) await safe("Parcels registered so far", async () => [true, String(await c.LandRegistry.parcelCount())]);
   return { ok: lines.every((l) => l.ok), lines };

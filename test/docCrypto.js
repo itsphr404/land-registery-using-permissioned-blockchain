@@ -92,6 +92,41 @@ describe("docCrypto", function () {
     it("round trips hexadecimal and base64 bytes", async function () {
         const bytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
         assert.deepEqual(crypto.fromHex(crypto.toHex(bytes)), bytes);
+        assert.deepEqual(crypto.fromHex(`0x${crypto.toHex(bytes)}`), bytes);
         assert.deepEqual(crypto.fromB64(crypto.toB64(bytes)), bytes);
+    });
+
+    it("accepts on-chain public and wrapped key representations", async function () {
+        const vault = await crypto.createVault("password", 1000);
+        const privateKey = await crypto.unlockVault(vault, "password");
+        const fileKey = await crypto.generateFileKey();
+        const envelope = await crypto.encryptFile("document", fileKey);
+        const spki = crypto.vaultPublicKeyBytes(vault);
+        const representations = [
+            spki,
+            spki.buffer.slice(spki.byteOffset, spki.byteOffset + spki.byteLength),
+            `0x${crypto.toHex(spki)}`
+        ];
+
+        for (const representation of representations) {
+            const wrapped = await crypto.wrapFileKey(fileKey, representation);
+            const unwrapped = await crypto.unwrapFileKey(`0x${crypto.toHex(wrapped)}`, privateKey);
+            assert.deepEqual(
+                await crypto.decryptFile(envelope, unwrapped),
+                new TextEncoder().encode("document")
+            );
+        }
+    });
+
+    it("reports invalid key inputs clearly", async function () {
+        const fileKey = await crypto.generateFileKey();
+        await assert.rejects(
+            () => crypto.wrapFileKey(fileKey, "0x"),
+            /not registered an encryption key/
+        );
+        await assert.rejects(
+            () => crypto.wrapFileKey(fileKey, 42),
+            /needs the reader's public key/
+        );
     });
 });

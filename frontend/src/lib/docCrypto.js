@@ -17,6 +17,9 @@ function asBytes(value) {
 }
 
 function copyBytes(value) {
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value.slice(0));
+    }
     return new Uint8Array(asBytes(value));
 }
 
@@ -25,12 +28,16 @@ export function toHex(bytes) {
 }
 
 export function fromHex(hex) {
-    if (typeof hex !== "string" || hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) {
+    if (typeof hex !== "string") {
         throw new TypeError("Invalid hexadecimal string");
     }
-    const bytes = new Uint8Array(hex.length / 2);
+    const normalized = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
+    if (normalized.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(normalized)) {
+        throw new TypeError("Invalid hexadecimal string");
+    }
+    const bytes = new Uint8Array(normalized.length / 2);
     for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        bytes[i] = Number.parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
     }
     return bytes;
 }
@@ -122,7 +129,41 @@ export async function importPublicKey(spki) {
     );
 }
 
+function isCryptoKey(value) {
+    return value !== null
+        && typeof value === "object"
+        && typeof value.type === "string"
+        && value.algorithm
+        && Array.isArray(value.usages);
+}
+
+function publicKeyBytes(value) {
+    if (typeof value === "string") {
+        return fromHex(value);
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    return null;
+}
+
 export async function wrapFileKey(fileKey, publicKey) {
+    if (!isCryptoKey(fileKey)) {
+        throw new TypeError("wrapFileKey needs the file key as a CryptoKey");
+    }
+    if (!isCryptoKey(publicKey)) {
+        const bytes = publicKeyBytes(publicKey);
+        if (!bytes) {
+            throw new TypeError("wrapFileKey needs the reader's public key as a CryptoKey, SPKI bytes, or 0x hex");
+        }
+        if (bytes.length === 0) {
+            throw new Error("This reader has not registered an encryption key yet");
+        }
+        publicKey = await importPublicKey(bytes);
+    }
     return new Uint8Array(await subtle.wrapKey(
         "raw",
         fileKey,
@@ -132,9 +173,16 @@ export async function wrapFileKey(fileKey, publicKey) {
 }
 
 export async function unwrapFileKey(wrapped, privateKey) {
+    if (!isCryptoKey(privateKey)) {
+        throw new TypeError("unwrapFileKey needs your unlocked vault key. Unlock the vault first");
+    }
+    const wrappedBytes = publicKeyBytes(wrapped);
+    if (!wrappedBytes || wrappedBytes.length === 0) {
+        throw new Error("There is no wrapped key to open (no access has been granted)");
+    }
     return subtle.unwrapKey(
         "raw",
-        copyBytes(wrapped),
+        wrappedBytes,
         privateKey,
         { name: "RSA-OAEP" },
         { name: "AES-GCM", length: 256 },

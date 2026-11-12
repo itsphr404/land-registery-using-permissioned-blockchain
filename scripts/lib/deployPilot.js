@@ -9,12 +9,17 @@ const OFFICIAL_ROLES = ["registrars", "surveyors", "courts"];
 function normalizeRoles(roles = {}) {
   const normalized = {};
   for (const role of ["registrars", "surveyors", "courts", "issuers"]) {
-    if (roles[role] === undefined) {
+    const singular = role.slice(0, -1);
+    if (roles[role] !== undefined && roles[singular] !== undefined) {
+      throw new Error(`Specify either ${role} or ${singular} roles, not both.`);
+    }
+    const addresses = roles[role] === undefined ? roles[singular] : roles[role];
+    if (addresses === undefined) {
       normalized[role] = [];
-    } else if (Array.isArray(roles[role])) {
-      normalized[role] = roles[role];
+    } else if (Array.isArray(addresses)) {
+      normalized[role] = addresses;
     } else {
-      throw new Error(`${role} roles must be an array.`);
+      throw new Error(`${role} or ${singular} roles must be an array.`);
     }
   }
   return normalized;
