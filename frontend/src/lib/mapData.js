@@ -58,3 +58,21 @@ export const cellPts = (a, c, k) => {
     Math.round(y + p[1] + (rnd(k * 9 + m + 5) - 0.5) * 4),
   ]);
 };
+
+export function separateSharedCells(items) {
+  const taken = {};
+  const moved = [];
+  for (const item of items) {
+    taken[item.area] ||= new Set();
+    if (taken[item.area].has(item.cell)) moved.push(item);
+    else taken[item.area].add(item.cell);
+  }
+  for (const item of moved) {
+    let next = 0;
+    while (taken[item.area].has(next)) next += 1;
+    taken[item.area].add(next);
+    item.cell = next;
+    item.pts = cellPts(item.area, next, item.pid);
+  }
+  return items;
+}

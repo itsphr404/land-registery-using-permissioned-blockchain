@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { ADDRESS_LABELS, config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
-import { cellPts } from "../lib/mapData";
+import { cellPts, separateSharedCells } from "../lib/mapData";
+import { readManifestMeta } from "../lib/manifestMeta";
 import { subscribeToBlockPoller } from "../lib/blockPoller";
 
 const STATUS = {
@@ -73,7 +74,7 @@ export function useParcels() {
           ]);
           const status = Number(statusValue);
           const info = STATUS[status] || { st: "pending", sub: null };
-          const meta = metadata[String(pid)] || {};
+          const meta = metadata[String(pid)] || (await readManifestMeta(cid, config)) || {};
           const area = meta.area || "Unmapped";
           reservedCells[area] ||= new Set();
           const cell = Number.isInteger(Number(meta.cell))
@@ -134,7 +135,7 @@ export function useParcels() {
           };
         })
       );
-      setParcels(items);
+      setParcels(separateSharedCells(items));
     } catch (err) {
       console.error("General error loading parcels:", err);
       setError(`Cannot reach the ${config.networkName} network.`);

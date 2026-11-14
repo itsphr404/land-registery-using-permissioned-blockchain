@@ -1,6 +1,8 @@
 import { ethers } from "ethers";
 import { config, deployment } from "../config";
 
+let sharedReadProvider = null;
+
 /**
  * Returns the wallet's BrowserProvider if provided, otherwise a fallback JsonRpcProvider.
  * @param {ethers.BrowserProvider|null} walletProvider
@@ -10,7 +12,11 @@ export function getReadProvider(walletProvider) {
   if (walletProvider) {
     return walletProvider;
   }
-  return new ethers.JsonRpcProvider(config.rpcUrl);
+  if (!sharedReadProvider) {
+    const network = ethers.Network.from(config.chainId);
+    sharedReadProvider = new ethers.JsonRpcProvider(config.rpcUrl, network, { staticNetwork: network });
+  }
+  return sharedReadProvider;
 }
 
 /**

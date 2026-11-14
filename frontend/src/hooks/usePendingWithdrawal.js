@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
-import { deployment } from "../config";
+import { config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
 
 export function usePendingWithdrawal(account) {
@@ -20,7 +20,10 @@ export function usePendingWithdrawal(account) {
 
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 1000);
+    const everyMs = config.chainId === 31337 ? 1000 : 20000;
+    const timer = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, everyMs);
     return () => clearInterval(timer);
   }, [refresh]);
 

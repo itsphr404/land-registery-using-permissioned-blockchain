@@ -18,7 +18,7 @@ export function parseManifest(bytes) {
             typeof value.meta.area !== "string" ||
             typeof value.meta.addr !== "string" ||
             typeof value.meta.size !== "number" ||
-            typeof value.meta.cell !== "string" ||
+            (typeof value.meta.cell !== "string" && typeof value.meta.cell !== "number") ||
             !value.doc || typeof value.doc !== "object" ||
             typeof value.doc.cid !== "string" ||
             value.doc.alg !== "AES-256-GCM" ||
