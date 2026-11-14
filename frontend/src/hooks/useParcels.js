@@ -74,6 +74,11 @@ export function useParcels() {
           ]);
           const status = Number(statusValue);
           const info = STATUS[status] || { st: "pending", sub: null };
+          const latest = Number(versionCount) > 0
+            ? await registry.getVersion(pid, Number(versionCount) - 1)
+            : null;
+          const docHash = latest?.docHash || null;
+          const cid = latest?.cid || "";
           const meta = metadata[String(pid)] || (await readManifestMeta(cid, config)) || {};
           const area = meta.area || "Unmapped";
           reservedCells[area] ||= new Set();
@@ -83,11 +88,6 @@ export function useParcels() {
           reservedCells[area].add(cell);
           const addr = meta.addr || `Parcel #${pid}`;
           const size = meta.size || "Unknown";
-          const latest = Number(versionCount) > 0
-            ? await registry.getVersion(pid, Number(versionCount) - 1)
-            : null;
-          const docHash = latest?.docHash || null;
-          const cid = latest?.cid || "";
           const expectedHash = ethers.id(JSON.stringify([area, addr, size]));
           const currentRound = Number(await registry.consentRound(pid));
           const ownerAddresses = ownerData[0];
