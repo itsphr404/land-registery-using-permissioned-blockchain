@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import { ADDRESS_LABELS, config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
 import { cellPts } from "../lib/mapData";
-import { queryFilterChunked } from "../lib/logs";
+import { subscribeToBlockPoller } from "../lib/blockPoller";
 
 const STATUS = {
   1: { st: "pending", sub: "survey" },
@@ -172,34 +172,16 @@ export function useParcels() {
       [contracts.escrow, "ListingCancelled"],
     ];
     const isLocal = config.chainId === 31337;
-    let pollTimer;
-    let lastBlock;
-    const refreshFromEvents = async () => {
-      const eventQueries = subscriptions.map(([contract, event]) => queryFilterChunked(
-        contract,
-        contract.filters[event] ? contract.filters[event]() : {},
-        deployment.deployBlock,
-        "latest"
-      ));
-      await Promise.all(eventQueries);
-      scheduleFetch();
-    };
+    const refreshFromEvents = () => scheduleFetch();
     if (isLocal) {
       subscriptions.forEach(([contract, event]) => contract.on(event, scheduleFetch));
-    } else {
-      pollTimer = setInterval(async () => {
-        const block = await provider.getBlockNumber();
-        if (block !== lastBlock) {
-          lastBlock = block;
-          await refreshFromEvents();
-        }
-      }, 15000);
     }
     fetchParcels();
+    const unsubscribe = isLocal ? () => {} : subscribeToBlockPoller(provider, refreshFromEvents);
 
     return () => {
       clearTimeout(timerRef.current);
-      clearInterval(pollTimer);
+      unsubscribe();
       if (isLocal) subscriptions.forEach(([contract, event]) => contract.off(event, scheduleFetch));
       listenersRef.current = [];
     };

@@ -149,7 +149,7 @@ export function SharesView() {
   );
 }
 
-export function AuditView({ events }) {
+export function AuditView({ events, error, onRetry }) {
   return (
     <div>
       <h1 className="page-title">
@@ -159,7 +159,12 @@ export function AuditView({ events }) {
         Transaction activity and append-only registry history are shown here.
       </p>
 
-      {events.map((e, idx) => (
+      {error ? (
+        <div className="sub">
+          <p>{error}</p>
+          {error === "Audit trail unavailable right now" && <button className="btn" onClick={onRetry}>Retry</button>}
+        </div>
+      ) : events.map((e, idx) => (
         <div key={idx} className="ev">
           <time>{e.time}</time>
           <span>

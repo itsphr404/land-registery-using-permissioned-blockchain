@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { AREAS } from "../lib/mapData";
-import { config } from "../config";
+import { config, deployment } from "../config";
 import { useWallet } from "../context/WalletContext";
 import { getWriteContracts } from "../lib/parcelActions";
 import { getReadProvider, getContracts } from "../lib/contracts";
@@ -12,8 +12,10 @@ import { buildManifest } from "../lib/manifest";
 import { encryptFile, generateFileKey, importPublicKey, sha256Bytes32, toHex, wrapFileKey } from "../lib/docCrypto";
 import { queryFilterChunked } from "../lib/logs";
 import { sendAndWait } from "../lib/transactions";
+import { decodeRevert, waitUntil } from "../lib/revert";
 
 const emptyOwner = { address: "", share: "" };
+const roleHoldersCache = new Map();
 
 export default function RegisterView({ onRegisterPlot }) {
   const { signer, account, status } = useWallet();
@@ -28,6 +30,9 @@ export default function RegisterView({ onRegisterPlot }) {
   const [file, setFile] = useState(null);
   const [readerOptions, setReaderOptions] = useState([]);
   const [selectedReaders, setSelectedReaders] = useState({});
+  const [grantAttempt, setGrantAttempt] = useState(null);
+  const [roleReaders, setRoleReaders] = useState([]);
+  const [readerError, setReaderError] = useState("");
 
   useEffect(() => {
     if (account && owners.length === 1 && !owners[0].address) {
@@ -40,37 +45,100 @@ export default function RegisterView({ onRegisterPlot }) {
     async function loadReaders() {
       const read = getContracts(getReadProvider(null));
       if (!read) return;
+      const deployBlock = Number(deployment?.deployBlock || 0);
+      if (!deployBlock && config.chainId !== 31337) {
+        setReaderError("Deploy block missing");
+        return;
+      }
+      const cacheKey = `${config.chainId}:${deployBlock}`;
+      if (roleHoldersCache.has(cacheKey)) {
+        setRoleReaders(roleHoldersCache.get(cacheKey));
+        return;
+      }
       try {
         const roleReaders = [];
         for (const role of [await read.roleManager.REGISTRAR_ROLE(), await read.roleManager.SURVEYOR_ROLE()]) {
-          const granted = await queryFilterChunked(read.roleManager, read.roleManager.filters.RoleGranted(role), config.deployBlock || 0);
-          const revoked = await queryFilterChunked(read.roleManager, read.roleManager.filters.RoleRevoked(role), config.deployBlock || 0);
+          const granted = await queryFilterChunked(read.roleManager, read.roleManager.filters.RoleGranted(role), deployment.deployBlock);
+          const revoked = await queryFilterChunked(read.roleManager, read.roleManager.filters.RoleRevoked(role), deployment.deployBlock);
           const revokedSet = new Set(revoked.map(event => event.args.account.toLowerCase()));
           granted.forEach(event => {
             if (!revokedSet.has(event.args.account.toLowerCase())) roleReaders.push(event.args.account);
           });
         }
-        const addresses = [...new Set([...owners.map(owner => owner.address.trim()), ...roleReaders].filter(ethers.isAddress))];
-        const options = await Promise.all(addresses.map(async address => ({
-          address,
-          key: await read.documentAccess.encryptionKeyOf(address)
-        })));
         if (active) {
-          setReaderOptions(options);
-          setSelectedReaders(current => Object.keys(current).length ? current : Object.fromEntries(options.filter(option => option.key !== "0x").map(option => [option.address.toLowerCase(), true])));
+          roleHoldersCache.set(cacheKey, roleReaders);
+          setRoleReaders(roleReaders);
         }
       } catch {
-        if (active) setReaderOptions([]);
+        if (active) setReaderError("Unable to load registered readers");
       }
     }
     loadReaders();
     return () => { active = false; };
-  }, [owners]);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadReaderKeys() {
+      const read = getContracts(getReadProvider(null));
+      if (!read) return;
+      const addresses = [...new Set([...owners.map(owner => owner.address.trim()), ...roleReaders].filter(ethers.isAddress))];
+      const options = await Promise.all(addresses.map(async address => ({
+        address,
+        key: await read.documentAccess.encryptionKeyOf(address)
+      })));
+      if (active) {
+        setReaderOptions(options);
+        setSelectedReaders(current => Object.keys(current).length ? current : Object.fromEntries(options.filter(option => option.key !== "0x").map(option => [option.address.toLowerCase(), true])));
+      }
+    }
+    loadReaderKeys().catch(() => {
+      if (active) setReaderOptions([]);
+    });
+    return () => { active = false; };
+  }, [owners, roleReaders]);
 
   const contractInterfaces = useMemo(() => {
     const contracts = signer ? getWriteContracts(signer) : null;
-    return contracts ? [contracts.registry.interface, contracts.roleManager.interface] : [];
+    return contracts ? {
+      LandRegistry: contracts.registry.interface,
+      DocumentAccess: contracts.documentAccess.interface,
+      TitleEscrow: contracts.escrow.interface,
+      RoleManager: contracts.roleManager.interface,
+    } : {};
   }, [signer]);
+
+  function grantErrorMessage(error) {
+    const decoded = decodeRevert(error, contractInterfaces);
+    if (decoded?.name === "ParcelNotFound") return "The network has not registered this parcel yet. Please wait a few seconds and retry.";
+    if (decoded?.selector) {
+      console.error("Unknown contract error:", error);
+      return `Unknown contract error (selector ${decoded.selector})`;
+    }
+    return friendlyError(error, contractInterfaces);
+  }
+
+  async function grantAccess(parcelId, fileKey, readers) {
+    const { documentAccess } = getWriteContracts(signer);
+    const wrappedKeys = await Promise.all(readers.map(reader => wrapFileKey(fileKey, importPublicKey(ethers.getBytes(reader.key)))));
+    await sendAndWait(documentAccess.grantAccessBatch(parcelId, readers.map(reader => reader.address), wrappedKeys.map(toHex)));
+  }
+
+  async function retryGrant() {
+    if (!grantAttempt) return;
+    setPhase("mining");
+    setMessage("Granting access…");
+    try {
+      await grantAccess(grantAttempt.parcelId, grantAttempt.fileKey, grantAttempt.readers);
+      setGrantAttempt(null);
+      setPhase("success");
+      setMessage(`Parcel ${grantAttempt.parcelId} recorded successfully.`);
+    } catch (error) {
+      setPhase("grant-error");
+      setMessage("Your parcel was registered but access was not granted");
+      console.error("Grant access failed:", error);
+    }
+  }
 
   function updateOwner(index, field, value) {
     setOwners((current) => current.map((owner, ownerIndex) => (
@@ -133,7 +201,7 @@ export default function RegisterView({ onRegisterPlot }) {
         area, addr: addr.trim(), size: metadataSize, cell, docCid, mime: file.type || "application/octet-stream", bytes: bytes.length
       }), { kind: "manifest" });
       setMessage("Registering parcel…");
-      const { registry, documentAccess } = getWriteContracts(signer);
+      const { registry } = getWriteContracts(signer);
       const tx = await registry.submitParcel(
         owners.map((owner) => owner.address.trim()),
         owners.map((owner) => Number(owner.share)),
@@ -146,19 +214,28 @@ export default function RegisterView({ onRegisterPlot }) {
       const event = receipt.logs.find((log) => log.fragment?.name === "ParcelSubmitted");
       const parcelId = event?.args?.parcelId;
       if (!parcelId) throw new Error("The confirmed transaction did not include a parcel ID.");
+      const readers = readerOptions.filter(reader => selectedReaders[reader.address.toLowerCase()] && reader.key !== "0x");
+      setGrantAttempt({ parcelId, fileKey, readers });
 
       current[String(parcelId)] = { area, addr: addr.trim(), size: `${metadataSize} m²`, cell };
       window.localStorage.setItem(metadataKey, JSON.stringify(current));
-      setMessage("Granting access…");
-      const readers = readerOptions.filter(reader => selectedReaders[reader.address.toLowerCase()] && reader.key !== "0x");
-      const wrappedKeys = await Promise.all(readers.map(reader => wrapFileKey(fileKey, importPublicKey(ethers.getBytes(reader.key)))));
+      setMessage("Waiting for the network to see your parcel...");
       try {
-        await sendAndWait(documentAccess.grantAccessBatch(parcelId, readers.map(reader => reader.address), wrappedKeys.map(toHex)));
+        const provider = signer.provider;
+        const readRegistry = getContracts(provider).registry;
+        await waitUntil(
+          () => readRegistry.isOwner(parcelId, account),
+          { intervalMs: 2000, timeoutMs: 60000, what: "the network to register your parcel" }
+        );
+        setMessage("Granting access…");
+        await grantAccess(parcelId, fileKey, readers);
       } catch (grantError) {
-        setPhase("error");
-        setMessage("Parcel registered but access not granted; use Grant access on the parcel card");
-        throw grantError;
+        setPhase("grant-error");
+        setMessage("Your parcel was registered but access was not granted");
+        console.error("Grant access failed:", grantError);
+        return;
       }
+      setGrantAttempt(null);
       setPhase("success");
       setMessage(`Parcel ${parcelId} recorded successfully.`);
       onRegisterPlot({ addr: addr.trim() });
@@ -168,7 +245,7 @@ export default function RegisterView({ onRegisterPlot }) {
       setFile(null);
     } catch (error) {
       setPhase("error");
-      setMessage(friendlyError(error, contractInterfaces));
+      setMessage(grantErrorMessage(error));
     }
   }
 
@@ -227,6 +304,7 @@ export default function RegisterView({ onRegisterPlot }) {
         {errors.shares && <span className="err">{errors.shares}</span>}
         {owners.length < 10 && <button type="button" className="btn alt" onClick={addOwner}>ADD OWNER</button>}
         <div className="k">INITIAL DOCUMENT READERS</div>
+        {readerError && <div className="note err">{readerError}</div>}
         {readerOptions.map(reader => (
           <label key={reader.address} style={{ display: "block" }}>
             <input
@@ -242,6 +320,10 @@ export default function RegisterView({ onRegisterPlot }) {
         {errors.wallet && <span className="err">{errors.wallet}</span>}
         {errors.vault && <span className="err">{errors.vault}</span>}
         {message && <div className={`note ${phase === "error" ? "err" : ""}`}>{message}</div>}
+        {phase === "grant-error" && <div className="note err">
+          Do not close or refresh this tab until access is granted.
+          <button type="button" className="btn alt" onClick={retryGrant}>RETRY GRANTING ACCESS</button>
+        </div>}
         <button type="submit" className="btn" disabled={phase === "waiting" || phase === "mining"}>
           {phase === "waiting" ? "CONFIRM IN WALLET…" : phase === "mining" ? "RECORDING…" : "SUBMIT PLOT"}
         </button>

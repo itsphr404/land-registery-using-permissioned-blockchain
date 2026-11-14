@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { useWallet } from "../context/WalletContext";
 import { useVault } from "../context/VaultContext";
-import { config } from "../config";
+import { config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
 import { getWriteContracts } from "../lib/parcelActions";
 import { createStorage } from "../lib/ipfs";
@@ -11,6 +11,8 @@ import { decryptFile, encryptFile, generateFileKey, importPublicKey, sha256Bytes
 import { friendlyError } from "../lib/errors";
 import { queryFilterChunked } from "../lib/logs";
 import { sendAndWait } from "../lib/transactions";
+
+const requestsCache = new Map();
 
 export default function DocumentPanel({ plot }) {
   const { account, signer } = useWallet();
@@ -32,13 +34,6 @@ export default function DocumentPanel({ plot }) {
       setManifest(parsed);
       setLegacy(false);
       setAccess(await read.documentAccess.hasAccess(plot.pid, account || ethers.ZeroAddress));
-      if (account && plot.owners.some(item => item.addr.toLowerCase() === account.toLowerCase())) {
-        const events = await queryFilterChunked(read.documentAccess,
-          read.documentAccess.filters.AccessRequested(plot.pid),
-          config.deployBlock || 0
-        );
-        setRequests(events.map(event => event.args.requester));
-      }
     } catch {
       setLegacy(true);
       setManifest(null);
@@ -47,6 +42,36 @@ export default function DocumentPanel({ plot }) {
   }
 
   useEffect(() => { load(); }, [plot.pid, plot.cid, account]);
+
+  useEffect(() => {
+    let active = true;
+    const owner = Boolean(account && plot.owners.some(item => item.addr.toLowerCase() === account.toLowerCase()));
+    if (!owner || requestsCache.has(`${config.chainId}:${plot.pid}`)) {
+      if (owner) setRequests(requestsCache.get(`${config.chainId}:${plot.pid}`) || []);
+      return () => { active = false; };
+    }
+    async function loadRequests() {
+      const read = getContracts(getReadProvider(null));
+      if (!read) return;
+      const deployBlock = Number(deployment?.deployBlock || 0);
+      if (!deployBlock && config.chainId !== 31337) {
+        if (active) setMessage("Deploy block missing");
+        return;
+      }
+      const events = await queryFilterChunked(
+        read.documentAccess,
+        read.documentAccess.filters.AccessRequested(plot.pid),
+        deployment.deployBlock
+      );
+      const addresses = events.map(event => event.args.requester);
+      requestsCache.set(`${config.chainId}:${plot.pid}`, addresses);
+      if (active) setRequests(addresses);
+    }
+    loadRequests().catch(() => {
+      if (active) setMessage("Unable to load access requests");
+    });
+    return () => { active = false; };
+  }, [account, plot.pid, plot.owners]);
 
   async function decryptAndVerify() {
     if (!privateKey) {

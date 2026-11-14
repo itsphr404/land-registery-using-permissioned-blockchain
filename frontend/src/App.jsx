@@ -22,7 +22,7 @@ function TerraApp() {
   const { account, status, roles, connect, switchNetwork, error } = useWallet();
   const { parcels: plots, refresh: refreshParcels } = useParcels();
   const { formatted: owed, refresh: refreshOwed } = usePendingWithdrawal(account);
-  const { events: auditEvents } = useAudit();
+  const { events: auditEvents, error: auditError, refresh: retryAudit } = useAudit(activeTab === "audit");
 
   const showToast = (toast) => {
     setToastMessage(toast);
@@ -164,7 +164,7 @@ function TerraApp() {
         )}
         {activeTab === "corrections" && <CorrectionsView />}
         {activeTab === "shares" && <SharesView />}
-        {activeTab === "audit" && <AuditView events={auditEvents} />}
+        {activeTab === "audit" && <AuditView events={auditEvents} error={auditError} onRetry={retryAudit} />}
       </main>
 
       {/* Toast notification */}

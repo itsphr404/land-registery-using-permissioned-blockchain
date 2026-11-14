@@ -1,3 +1,5 @@
+import { decodeRevert } from "./revert";
+
 const MESSAGES = {
   NotRegistrar: "Only a registrar can perform this action.",
   NotSurveyor: "Only a surveyor can perform this action.",
@@ -5,7 +7,7 @@ const MESSAGES = {
   ConflictingRole: "That account already holds a conflicting role.",
   ConsentsMissing: "Every parcel owner must consent before the sale can be listed.",
   InvalidStatus: "The parcel is not in the required status for this action.",
-  ParcelNotFound: "The requested parcel does not exist.",
+  ParcelNotFound: "The network has not registered this parcel yet. Please wait a few seconds and retry.",
   NotParcelOwner: "Your wallet is not a parcel owner.",
   NotAParcelOwner: "Your wallet is not a parcel owner.",
   AlreadyConsented: "This owner has already consented for the current sale round.",
@@ -35,30 +37,21 @@ const MESSAGES = {
   EmptyCid: "A document CID is required.",
 };
 
-function findData(error) {
-  return error?.data
-    || error?.info?.error?.data
-    || error?.error?.data
-    || error?.receipt?.revertReason
-    || null;
-}
-
 export function friendlyError(error, contractInterfaces = []) {
   if (error?.code === "ACTION_REJECTED" || error?.code === 4001) {
     return "You cancelled the request.";
   }
 
-  const interfaces = Array.isArray(contractInterfaces) ? contractInterfaces : [contractInterfaces];
-  const data = findData(error);
-  if (data) {
-    for (const contractInterface of interfaces) {
-      try {
-        const parsed = contractInterface?.parseError(data);
-        if (parsed?.name && MESSAGES[parsed.name]) return MESSAGES[parsed.name];
-      } catch {
-        // Try the next known contract interface.
-      }
-    }
+  const interfaces = Array.isArray(contractInterfaces)
+    ? Object.fromEntries(contractInterfaces.map((contractInterface, index) => [`Contract${index}`, contractInterface]))
+    : contractInterfaces;
+  const decoded = decodeRevert(error, interfaces);
+  if (decoded?.name && MESSAGES[decoded.name]) {
+    return MESSAGES[decoded.name];
+  }
+  if (decoded?.selector) {
+    console.error("Unknown contract error:", error);
+    return `Unknown contract error (selector ${decoded.selector})`;
   }
 
   const raw = error?.shortMessage || error?.reason || error?.message || "";
