@@ -45,6 +45,13 @@ export default function RegisterView({ onRegisterPlot }) {
     async function loadReaders() {
       const read = getContracts(getReadProvider(null));
       if (!read) return;
+      if (config.chainId !== 31337) {
+        // Public RPC plans cap eth_getLogs ranges, so scanning role events fails there.
+        // Use the registrars and surveyors recorded in the deployment file instead.
+        const recorded = [...(deployment?.roles?.registrars || []), ...(deployment?.roles?.surveyors || [])];
+        if (active) setRoleReaders(recorded);
+        return;
+      }
       const deployBlock = Number(deployment?.deployBlock || 0);
       if (!deployBlock && config.chainId !== 31337) {
         setReaderError("Deploy block missing");
