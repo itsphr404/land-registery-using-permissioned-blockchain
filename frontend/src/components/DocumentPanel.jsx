@@ -154,7 +154,7 @@ export default function DocumentPanel({ plot }) {
         const key = await read.documentAccess.encryptionKeyOf(owner.addr);
         if (key && key !== "0x") readers.push({ address: owner.addr, key });
       }
-      const keys = await Promise.all(readers.map(reader => wrapFileKey(nextKey, importPublicKey(ethers.getBytes(reader.key)))));
+      const keys = await Promise.all(readers.map(reader => wrapFileKey(nextKey, ethers.getBytes(reader.key))));
       const contracts = getWriteContracts(signer);
       await sendAndWait(contracts.documentAccess.rotateDocument(plot.pid, nextCid, readers.map(reader => reader.address), keys.map(toHex)));
       setMessage("Document rotated; previous epoch access is cut off.");
