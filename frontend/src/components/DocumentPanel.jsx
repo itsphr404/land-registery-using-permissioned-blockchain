@@ -7,7 +7,7 @@ import { getReadProvider, getContracts } from "../lib/contracts";
 import { getWriteContracts } from "../lib/parcelActions";
 import { createStorage } from "../lib/ipfs";
 import { parseManifest } from "../lib/manifest";
-import { decryptFile, encryptFile, generateFileKey, importPublicKey, sha256Bytes32, toHex, unwrapFileKey, wrapFileKey } from "../lib/docCrypto";
+import { decryptFile, encryptFile, generateFileKey, importPublicKey, sha256Bytes32, unwrapFileKey, wrapFileKey } from "../lib/docCrypto";
 import { friendlyError } from "../lib/errors";
 import { queryFilterChunked } from "../lib/logs";
 import { sendAndWait } from "../lib/transactions";
@@ -113,7 +113,7 @@ export default function DocumentPanel({ plot }) {
       const ownWrapped = await read.documentAccess.getWrappedKey(plot.pid, account);
       const ownKey = await unwrapFileKey(ethers.getBytes(ownWrapped), privateKey);
       const contracts = getWriteContracts(signer);
-      await sendAndWait(contracts.documentAccess.grantAccess(plot.pid, grantAddress, toHex(await wrapFileKey(ownKey, await importPublicKey(ethers.getBytes(key))))));
+      await sendAndWait(contracts.documentAccess.grantAccess(plot.pid, grantAddress, await wrapFileKey(ownKey, await importPublicKey(ethers.getBytes(key)))));
       setMessage("Access granted.");
     } catch (error) {
       const read = getContracts(getReadProvider(null));
@@ -156,7 +156,7 @@ export default function DocumentPanel({ plot }) {
       }
       const keys = await Promise.all(readers.map(reader => wrapFileKey(nextKey, ethers.getBytes(reader.key))));
       const contracts = getWriteContracts(signer);
-      await sendAndWait(contracts.documentAccess.rotateDocument(plot.pid, nextCid, readers.map(reader => reader.address), keys.map(toHex)));
+      await sendAndWait(contracts.documentAccess.rotateDocument(plot.pid, nextCid, readers.map(reader => reader.address), keys));
       setMessage("Document rotated; previous epoch access is cut off.");
       await load();
     } catch (error) {

@@ -9,7 +9,7 @@ import { friendlyError } from "../lib/errors";
 import { useVault } from "../context/VaultContext";
 import { createStorage } from "../lib/ipfs";
 import { buildManifest } from "../lib/manifest";
-import { encryptFile, generateFileKey, sha256Bytes32, toHex, wrapFileKey } from "../lib/docCrypto";
+import { encryptFile, generateFileKey, sha256Bytes32, wrapFileKey } from "../lib/docCrypto";
 import { queryFilterChunked } from "../lib/logs";
 import { sendAndWait } from "../lib/transactions";
 import { decodeRevert, waitUntil } from "../lib/revert";
@@ -128,7 +128,7 @@ export default function RegisterView({ onRegisterPlot }) {
   async function grantAccess(parcelId, fileKey, readers) {
     const { documentAccess } = getWriteContracts(signer);
     const wrappedKeys = await Promise.all(readers.map(reader => wrapFileKey(fileKey, ethers.getBytes(reader.key))));
-    await sendAndWait(documentAccess.grantAccessBatch(parcelId, readers.map(reader => reader.address), wrappedKeys.map(toHex)));
+    await sendAndWait(documentAccess.grantAccessBatch(parcelId, readers.map(reader => reader.address), wrappedKeys));
   }
 
   async function retryGrant() {
