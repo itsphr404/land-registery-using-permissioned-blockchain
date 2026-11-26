@@ -4,7 +4,9 @@
 .mapmode .notice { color: var(--mute); font-size: 12px; }
 
 /* Map canvas fills its container (.mapbox on the map page, .lp-map in the picker). */
-.globe { position: absolute; inset: 0; background: #05070d; }
+/* MapLibre sets .maplibregl-map to position: relative; this selector keeps the canvas sized. */
+.globe,
+.globe.maplibregl-map { position: absolute; inset: 0; background: #05070d; }
 .globe-loading {
   position: absolute; inset: 0; z-index: 4; display: grid; place-items: center;
   padding: 16px; text-align: center; pointer-events: none;

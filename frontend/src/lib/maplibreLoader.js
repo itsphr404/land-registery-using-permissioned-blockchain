@@ -39,8 +39,16 @@ export function prefersReducedMotion() {
 let loading = null;
 export function loadMaplibre() {
     if (!loading) {
-        loading = Promise.all([import("maplibre-gl"), import("maplibre-gl/dist/maplibre-gl.css")])
-            .then(([mod]) => mod.default || mod)
+        loading = Promise.all([
+            import("maplibre-gl"),
+            import("maplibre-gl/dist/maplibre-gl.css"),
+            import("maplibre-gl/dist/maplibre-gl-worker.mjs?url")
+        ])
+            .then(([mod, , worker]) => {
+                const lib = mod.default || mod;
+                lib.setWorkerUrl(worker.default);
+                return lib;
+            })
             .catch((error) => {
                 loading = null; // allow a retry after a network failure
                 throw error;
