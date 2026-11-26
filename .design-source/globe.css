@@ -1,0 +1,51 @@
+/* Globe map, location picker and map-style switch. Uses the existing theme variables from index.css. */
+
+.mapmode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.mapmode .notice { color: var(--mute); font-size: 12px; }
+
+/* Map canvas fills its container (.mapbox on the map page, .lp-map in the picker). */
+.globe { position: absolute; inset: 0; background: #05070d; }
+.globe-loading {
+  position: absolute; inset: 0; z-index: 4; display: grid; place-items: center;
+  padding: 16px; text-align: center; pointer-events: none;
+  color: #cfd3d6; font: 12px var(--mono);
+}
+.globe-warn {
+  position: absolute; left: 12px; right: 60px; top: 12px; z-index: 6;
+  background: rgba(0, 0, 0, .8); color: #fff; font: 12px var(--mono); padding: 6px 10px;
+}
+.zoom button[aria-pressed="true"] { background: var(--forest); color: #111; }
+
+.globe-legend { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--mute); font: 11px var(--mono); }
+.g.demo-sample { background: transparent; border-style: dashed; color: var(--mute); }
+
+/* Parcel markers. MapLibre positions them with transform, so never set transform on .gm. */
+.gm { width: 26px; height: 26px; padding: 0; font-size: 12px; cursor: pointer; }
+.gm.off { display: none !important; }
+.gm.sel { outline: 3px solid #fff; outline-offset: 2px; }
+.gm.mine { box-shadow: 0 0 0 1px #111, 0 0 0 4px #D2A363; }
+.gm.g.demo { background: rgba(10, 14, 20, .6); border-style: dashed; }
+.gm.g.demo.approved { color: #5BC48A; border-color: #5BC48A; }
+.gm.g.demo.sale { color: #EBB444; border-color: #EBB444; }
+.gm.g.demo.disputed { color: #EE6A57; border-color: #EE6A57; }
+.gm.g.demo.court { color: #69AEE8; border-color: #69AEE8; }
+.gm.g.demo.pending { color: #E4E4E4; border-color: #E4E4E4; }
+
+/* Location field in the Register form */
+.loc-field { display: grid; gap: 6px; margin: 4px 0; }
+.loc-field .loc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Location picker dialog */
+.lp-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 12px; background: rgba(0, 0, 0, .65); }
+.lp { display: flex; flex-direction: column; width: min(940px, 100%); max-height: 100%; overflow: auto; outline: none; background: var(--sheet); color: var(--ink); border: 1.5px solid var(--ink); }
+.lp-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.lp-head h3 { margin: 0; font: 600 20px var(--serif); }
+.lp-note { margin: 0; border-radius: 0; }
+.lp-map { position: relative; flex: none; height: min(52vh, 460px); min-height: 260px; background: #05070d; }
+.lp-body { display: grid; gap: 10px; padding: 12px 14px; }
+.lp-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.lp-row label { display: grid; gap: 4px; color: var(--mute); font: 11px var(--mono); }
+.lp-row input { width: 150px; padding: 8px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); font: 14px var(--mono); }
+.lp-actions { justify-content: flex-end; }
+.lp-coords { margin: 0; font-size: 13px; }
+.lp-hint { margin: 0; color: var(--mute); font-size: 12px; }

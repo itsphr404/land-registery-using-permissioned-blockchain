@@ -4,6 +4,7 @@ import { ADDRESS_LABELS, config, deployment } from "../config";
 import { getReadProvider, getContracts } from "../lib/contracts";
 import { cellPts, separateSharedCells } from "../lib/mapData";
 import { readManifestMeta } from "../lib/manifestMeta";
+import { demoPlacement, normalizeLoc } from "../lib/geo";
 import { subscribeToBlockPoller } from "../lib/blockPoller";
 
 const STATUS = {
@@ -88,6 +89,8 @@ export function useParcels() {
           reservedCells[area].add(cell);
           const addr = meta.addr || `Parcel #${pid}`;
           const size = meta.size || "Unknown";
+          const recorded = normalizeLoc(meta.lat, meta.lng);
+          const loc = recorded || demoPlacement(pid);
           const expectedHash = ethers.id(JSON.stringify([area, addr, size]));
           const currentRound = Number(await registry.consentRound(pid));
           const ownerAddresses = ownerData[0];
@@ -120,6 +123,8 @@ export function useParcels() {
             size,
             cell,
             pts: cellPts(area, cell, pid),
+            loc: { lat: loc.lat, lng: loc.lng },
+            locKind: recorded ? "recorded" : "demo",
             owners: ownerAddresses.map((address, ownerIndex) => ({
               addr: address,
               share: Number(ownerData[1][ownerIndex]),

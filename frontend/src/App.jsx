@@ -3,7 +3,7 @@ import { WalletProvider, useWallet } from "./context/WalletContext";
 import { VIEWS } from "./lib/mapData";
 import { ADDRESS_LABELS, config } from "./config";
 import { useParcels } from "./hooks/useParcels";
-import MapView from "./components/MapView";
+import MapPage from "./components/MapPage";
 import DashboardView from "./components/DashboardView";
 import RegistryView from "./components/RegistryView";
 import SalesView from "./components/SalesView";
@@ -139,8 +139,8 @@ function TerraApp() {
         {plots.length === 0 && activeTab !== "register" ? (
           <p className="sub" style={{ padding: "24px 0" }}>No parcels on this network yet. Register the first one.</p>
         ) : null}
-        {activeTab === "map" && plots.length > 0 && (
-          <MapView plots={plots} onSelectView={setActiveTab} />
+        {activeTab === "map" && (
+          <MapPage plots={plots} onSelectView={setActiveTab} />
         )}
         {activeTab === "dashboard" && (
           <DashboardView

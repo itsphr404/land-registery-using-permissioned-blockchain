@@ -1,5 +1,6 @@
 import { createStorage } from "./ipfs";
 import { parseManifest } from "./manifest";
+import normalizeLoc from "./geo.js";
 
 const found = new Map();
 const failedAt = new Map();
@@ -19,6 +20,11 @@ export async function readManifestMeta(cid, settings, makeStorage = createStorag
     });
     const { meta } = parseManifest(await storage.download(cid));
     const details = { area: meta.area, addr: meta.addr, size: `${meta.size} m²`, cell: Number(meta.cell) };
+    const loc = normalizeLoc(meta.lat, meta.lng);
+    if (loc) {
+      details.lat = loc.lat;
+      details.lng = loc.lng;
+    }
     found.set(cid, details);
     return details;
   } catch (error) {

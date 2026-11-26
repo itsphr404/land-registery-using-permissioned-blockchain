@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { AREAS } from "../lib/mapData";
 import { config, deployment } from "../config";
@@ -9,10 +9,13 @@ import { friendlyError } from "../lib/errors";
 import { useVault } from "../context/VaultContext";
 import { createStorage } from "../lib/ipfs";
 import { buildManifest } from "../lib/manifest";
+import { formatCoords } from "../lib/geo";
 import { encryptFile, generateFileKey, sha256Bytes32, wrapFileKey } from "../lib/docCrypto";
 import { queryFilterChunked } from "../lib/logs";
 import { sendAndWait } from "../lib/transactions";
 import { decodeRevert, waitUntil } from "../lib/revert";
+
+const LocationPicker = lazy(() => import("./LocationPicker"));
 
 const emptyOwner = { address: "", share: "" };
 const roleHoldersCache = new Map();
@@ -23,6 +26,8 @@ export default function RegisterView({ onRegisterPlot }) {
   const [area, setArea] = useState("Northfield");
   const [addr, setAddr] = useState("");
   const [size, setSize] = useState("");
+  const [location, setLocation] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [owners, setOwners] = useState(() => [{ address: account || "", share: "100" }]);
   const [errors, setErrors] = useState({});
   const [phase, setPhase] = useState("idle");
@@ -205,7 +210,7 @@ export default function RegisterView({ onRegisterPlot }) {
       let cell = 0;
       while (used.includes(cell)) cell += 1;
       const manifestCid = await storage.upload(buildManifest({
-        area, addr: addr.trim(), size: metadataSize, cell, docCid, mime: file.type || "application/octet-stream", bytes: bytes.length
+        area, addr: addr.trim(), size: metadataSize, cell, lat: location?.lat, lng: location?.lng, docCid, mime: file.type || "application/octet-stream", bytes: bytes.length
       }), { kind: "manifest" });
       setMessage("Registering parcel…");
       const { registry } = getWriteContracts(signer);
@@ -224,7 +229,7 @@ export default function RegisterView({ onRegisterPlot }) {
       const readers = readerOptions.filter(reader => selectedReaders[reader.address.toLowerCase()] && reader.key !== "0x");
       setGrantAttempt({ parcelId, fileKey, readers });
 
-      current[String(parcelId)] = { area, addr: addr.trim(), size: `${metadataSize} m²`, cell };
+      current[String(parcelId)] = { area, addr: addr.trim(), size: `${metadataSize} m²`, cell, ...(location ? { lat: location.lat, lng: location.lng } : {}) };
       window.localStorage.setItem(metadataKey, JSON.stringify(current));
       setMessage("Waiting for the network to see your parcel...");
       try {
@@ -248,6 +253,7 @@ export default function RegisterView({ onRegisterPlot }) {
       onRegisterPlot({ addr: addr.trim() });
       setAddr("");
       setSize("");
+      setLocation(null);
       setOwners([{ address: account, share: "100" }]);
       setFile(null);
     } catch (error) {
@@ -282,6 +288,21 @@ export default function RegisterView({ onRegisterPlot }) {
           <input type="number" value={size} onChange={(event) => setSize(event.target.value)} placeholder="e.g. 450" />
           {errors.size && <span className="err">{errors.size}</span>}
         </label>
+
+        <div className="loc-field">
+          <span className="k">LOCATION (OPTIONAL)</span>
+          {location ? (
+            <p className="mono" style={{ margin: 0 }}>{formatCoords(location)}</p>
+          ) : (
+            <p className="sub" style={{ margin: 0 }}>No location chosen. The plot will appear as a demo placement on the globe.</p>
+          )}
+          <div className="loc-actions">
+            <button type="button" className="btn alt" onClick={() => setPickerOpen(true)}>
+              {location ? "CHANGE LOCATION" : "PICK ON GLOBE"}
+            </button>
+            {location && <button type="button" className="btn alt" onClick={() => setLocation(null)}>CLEAR</button>}
+          </div>
+        </div>
 
         <div className="k">OWNERS AND SHARES</div>
         {owners.map((owner, index) => (
@@ -335,6 +356,18 @@ export default function RegisterView({ onRegisterPlot }) {
           {phase === "waiting" ? "CONFIRM IN WALLET…" : phase === "mining" ? "RECORDING…" : "SUBMIT PLOT"}
         </button>
       </form>
+      {pickerOpen && (
+        <Suspense fallback={null}>
+          <LocationPicker
+            initial={location}
+            onConfirm={(picked) => {
+              setLocation(picked);
+              setPickerOpen(false);
+            }}
+            onCancel={() => setPickerOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

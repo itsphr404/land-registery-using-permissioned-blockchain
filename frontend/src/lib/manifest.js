@@ -1,10 +1,16 @@
+import normalizeLoc from "./geo.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function buildManifest({ area, addr, size, cell, docCid, mime, bytes }) {
+export function buildManifest({ area, addr, size, cell, lat, lng, docCid, mime, bytes }) {
+    const loc = normalizeLoc(lat, lng);
+    const meta = loc
+        ? { area, addr, size, cell, lat: loc.lat, lng: loc.lng }
+        : { area, addr, size, cell };
     return encoder.encode(JSON.stringify({
         v: 1,
-        meta: { area, addr, size, cell },
+        meta,
         doc: { cid: docCid, alg: "AES-256-GCM", mime, bytes }
     }));
 }
